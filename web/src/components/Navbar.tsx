@@ -3,8 +3,8 @@ import CardNav from "./ui/card-nav";
 const NAV_ITEMS = [
   {
     label: "About",
-    bgColor: "#1B1722",
-    textColor: "#fff",
+    bgColor: "var(--primary-bg-color)",
+    textColor: "var(--primary-text-color)",
     links: [
       { label: "Company", ariaLabel: "About Company", href: "#company" },
       { label: "Careers", ariaLabel: "About Careers", href: "#careers" },
@@ -12,8 +12,8 @@ const NAV_ITEMS = [
   },
   {
     label: "Projects",
-    bgColor: "#2F293A",
-    textColor: "#fff",
+    bgColor: "var(--primary-color)",
+    textColor: "var(--primary-text-color)",
     links: [
       { label: "Featured", ariaLabel: "Featured Projects", href: "#featured" },
       {
@@ -25,8 +25,8 @@ const NAV_ITEMS = [
   },
   {
     label: "Contact",
-    bgColor: "#2F293A",
-    textColor: "#fff",
+    bgColor: "var(--secondary-color)",
+    textColor: "var(--primary-text-color)",
     links: [
       {
         label: "Email",
@@ -49,10 +49,10 @@ export default function Navbar() {
       logo="/logo.png"
       logoAlt="NourishAI"
       items={NAV_ITEMS}
-      baseColor="#151717"
-      menuColor="#c74203"
-      buttonBgColor="#0a0d0c"
-      buttonTextColor="#c74203"
+      baseColor="var(--primary-bg-color)"
+      menuColor="var(--secondary-color)"
+      buttonBgColor="var(--primary-bg-color)"
+      buttonTextColor="var(--secondary-color)"
       ease="power3.out"
     />
   );

@@ -40,7 +40,7 @@ export default function RootLayout({
       data-scroll-behavior="smooth"
     >
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-(--primary-bg-color)`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-(--primary-bg-color)`}
       >
         <Navbar />
         <main>
