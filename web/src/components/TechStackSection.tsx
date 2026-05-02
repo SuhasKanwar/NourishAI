@@ -139,7 +139,6 @@ export default function TechStackSection() {
                                 (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
                             }}
                         >
-                            {/* top row */}
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2.5">
                                     <div
@@ -169,7 +168,6 @@ export default function TechStackSection() {
                                 </span>
                             </div>
 
-                            {/* name */}
                             <p
                                 className="font-semibold"
                                 style={{ color: "#f6f9fc", fontSize: "1.05rem" }}
@@ -177,7 +175,6 @@ export default function TechStackSection() {
                                 {item.name}
                             </p>
 
-                            {/* detail */}
                             <p
                                 style={{
                                     fontSize: "0.85rem",
