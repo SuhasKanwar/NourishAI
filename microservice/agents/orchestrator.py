@@ -204,23 +204,44 @@ class NourishAgentOrchestrator:
             items = data.get("restaurants") or data.get("cards") or data.get("items") or data.get("products") or data.get("addresses") or []
         else:
             items = data if isinstance(data, list) else []
+            
+        # Flatten Instamart widgets if necessary
+        flattened_items = []
+        for item in items:
+            if isinstance(item, dict) and "products" in item and isinstance(item["products"], list):
+                flattened_items.extend(item["products"])
+            else:
+                flattened_items.append(item)
+        items = flattened_items
+
         normalized: list[Recommendation] = []
         for index, item in enumerate(items[:12]):
             if not isinstance(item, dict):
                 continue
             
+            # Instamart items often don't have an 'info' wrapper, they are the item themselves
             info = item.get("info") or item
             
-            status = str(info.get("availabilityStatus") or info.get("availability", {}).get("opened", True)).upper()
-            if status in {"CLOSED", "FALSE"}:
-                continue
-            price = _money(info.get("costForTwo") or info.get("price") or info.get("avgCost"))
+            # Heuristic for name
+            name = info.get("name") or info.get("displayName") or info.get("title")
+            if not name and category == "grocery":
+                # Maybe it's a list of products in a widget
+                if "products" in item:
+                    # Skip top-level widgets, we want the products inside
+                    continue
+            
+            title = str(name or "Swiggy pick")
+            vendor = str(info.get("brand") or info.get("name") or info.get("restaurantName") or "Swiggy")
+            description = str(info.get("description") or info.get("cuisines") or "Available nearby")
+            
+            price = _money(info.get("price") or info.get("costForTwo") or info.get("avgCost"))
+            
             normalized.append(
                 Recommendation(
-                    id=str(info.get("id") or info.get("restaurantId") or info.get("productId") or f"swiggy-{index}"),
-                    title=str(info.get("name") or info.get("displayName") or info.get("title") or "Swiggy pick"),
-                    vendor=str(info.get("name") or info.get("brand") or info.get("restaurantName") or "Swiggy"),
-                    description=str(info.get("cuisines") or info.get("description") or "Available nearby"),
+                    id=str(info.get("id") or info.get("restaurantId") or info.get("productId") or info.get("spinId") or f"swiggy-{index}"),
+                    title=title,
+                    vendor=vendor,
+                    description=description,
                     price=price,
                     rating=_float(info.get("avgRating") or info.get("rating")),
                     eta_minutes=_int(info.get("sla", {}).get("deliveryTime") or info.get("deliveryTime") or info.get("etaMinutes")),
@@ -277,7 +298,7 @@ class NourishAgentOrchestrator:
         return [
             DashboardAction(
                 id=f"order-{top.id}",
-                label="Order now",
+                label=f"Order {top.title[:25]}",
                 type="order_food" if top.category == "restaurant" else "order_groceries",
                 status=status,
                 payload={
@@ -363,17 +384,39 @@ class NourishAgentOrchestrator:
 
     def _search_query(self, prompt: str, meal_type: str) -> str:
         lower = prompt.lower()
-        for term in ("biryani", "thali", "pizza", "burger", "roll", "salad", "dosa", "idli", "rice bowl"):
-            if term in lower:
-                return term
+        # Common food and dietary keywords
+        keywords = [
+            "biryani", "thali", "pizza", "burger", "roll", "salad", "dosa", "idli", 
+            "rice bowl", "protein", "veg", "vegan", "chicken", "paneer", "healthy",
+            "diet", "keto", "snack", "dessert", "mutton", "fish", "egg", "chinese",
+            "north indian", "south indian", "italian", "pasta", "sandwich", "juice"
+        ]
+        
+        found = [term for term in keywords if term in lower]
+        
+        if found:
+            # If we found specific terms, use them.
+            return " ".join(found)
+        
+        # If no keywords found but prompt is short, it might be the query itself
+        words = lower.split()
+        if len(words) <= 3 and "want" not in words and "suggest" not in words:
+            return lower.strip(" .!?")
+
+        # Fallback to meal defaults
         defaults = {
             "breakfast": "idli dosa",
             "lunch": "thali rice bowl",
             "snack": "roll sandwich",
             "dinner": "thali biryani",
         }
-        normalized_meal = str(meal_type).replace("MealType.", "")
-        return defaults.get(normalized_meal, "healthy meal")
+        # Handle string or Enum
+        meal_str = str(meal_type).lower()
+        for key in defaults:
+            if key in meal_str:
+                return defaults[key]
+        
+        return "healthy meal"
 
 
 def _float(value: Any) -> float | None:

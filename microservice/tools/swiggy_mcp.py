@@ -67,7 +67,25 @@ class SwiggyMCPClient:
             
         if "error" in data:
             raise RuntimeError(data["error"].get("message", "Swiggy MCP call failed."))
-        return data.get("result", data)
+        
+        result = data.get("result", data)
+        return self._parse_tool_response(result)
+
+    def _parse_tool_response(self, data: Any) -> Any:
+        if isinstance(data, dict):
+            content = data.get("structuredContent") or data.get("data") or data.get("content") or data.get("result")
+            if content:
+                return self._parse_tool_response(content)
+        
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and data[0].get("type") == "text":
+            try:
+                text = data[0].get("text", "")
+                if text.strip().startswith(("{", "[")):
+                    parsed = json.loads(text)
+                    return self._parse_tool_response(parsed)
+            except Exception:
+                pass
+        return data
 
 
 client = SwiggyMCPClient()
@@ -158,27 +176,21 @@ async def search_groceries(query: str, access_token: str | None = None, address_
     )
 
 
-def _pick_address_id(addresses: dict[str, Any], location: str | None) -> str:
-    data = addresses.get("structuredContent") or addresses.get("data") or addresses.get("content") or addresses.get("result") or []
-    if isinstance(data, list) and data and isinstance(data[0], dict) and data[0].get("type") == "text":
-        try:
-            parsed = json.loads(data[0].get("text", "{}"))
-            data = parsed.get("structuredContent") or parsed.get("data") or parsed
-        except Exception:
-            pass
-            
-    if isinstance(data, dict):
-        data = data.get("addresses", [])
-    if not data:
-        raise RuntimeError("No Swiggy delivery address found. Add an address in Swiggy first.")
-    if location:
-        location_lower = location.lower()
-        for address in data:
-            label = str(address.get("label") or address.get("address") or "").lower()
-            if location_lower in label:
-                return str(address.get("id") or address.get("addressId"))
-    first = data[0]
-    return str(first.get("id") or first.get("addressId"))
+def _pick_address_id(addresses: Any, location: str | None) -> str:
+    items = []
+    if isinstance(addresses, dict):
+        items = addresses.get("addresses") or addresses.get("items") or addresses.get("data") or []
+    elif isinstance(addresses, list):
+        items = addresses
+    
+    if not items or not isinstance(items, list):
+        return "default"
+    
+    # Simple heuristic: first address
+    first = items[0]
+    if isinstance(first, dict):
+        return str(first.get("id") or first.get("addressId") or "default")
+    return "default"
 
 
 @tool
