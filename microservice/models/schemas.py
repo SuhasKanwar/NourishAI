@@ -16,7 +16,9 @@ class MealType(str, Enum):
 
 class UserContext(BaseModel):
     user_id: str = "demo-user"
-    location: str = "Bengaluru, India"
+    location: str = "Current location"
+    latitude: float | None = None
+    longitude: float | None = None
     address_id: str | None = None
     meal_type: MealType
     local_time: datetime
@@ -29,6 +31,8 @@ class AgentRunRequest(BaseModel):
     prompt: str = Field(..., min_length=2)
     user_id: str = "demo-user"
     location: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     address_id: str | None = None
     budget_limit: int | None = None
 
@@ -43,7 +47,8 @@ class Recommendation(BaseModel):
     rating: float | None = None
     eta_minutes: int | None = None
     tags: list[str] = []
-    source: Literal["swiggy", "fallback"] = "swiggy"
+    category: Literal["meal", "restaurant", "dineout", "grocery"] = "meal"
+    source: Literal["swiggy"] = "swiggy"
     raw: dict[str, Any] = {}
 
 
@@ -57,9 +62,13 @@ class DashboardAction(BaseModel):
 
 class AgentRunResponse(BaseModel):
     recommendations: list[Recommendation]
+    restaurants: list[Recommendation] = []
+    dineouts: list[Recommendation] = []
+    groceries: list[Recommendation] = []
     actions: list[DashboardAction]
     reasoning: str
     context: UserContext
+    budget: dict[str, Any] = {}
     ui_patch: dict[str, Any] = {}
 
 

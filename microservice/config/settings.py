@@ -23,8 +23,8 @@ class Settings:
         "mcp:tools mcp:resources mcp:prompts",
     )
     token_encryption_key: str | None = os.getenv("TOKEN_ENCRYPTION_KEY")
-    weather_api_url: str = os.getenv("WEATHER_API_URL", "https://wttr.in")
-    enable_weather_api: bool = os.getenv("ENABLE_WEATHER_API", "false").lower() == "true"
+    weather_api_url: str = os.getenv("WEATHER_API_URL", "https://api.open-meteo.com/v1/forecast")
+    enable_weather_api: bool = os.getenv("ENABLE_WEATHER_API", "true").lower() == "true"
 
 
 @lru_cache

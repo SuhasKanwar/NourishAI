@@ -133,6 +133,22 @@ async def book_table(details: dict[str, Any], user_id: str = "demo-user") -> dic
     return await client.call_tool(user_id, "dineout", "book_table", details)
 
 
+async def search_dineout(details: dict[str, Any], user_id: str = "demo-user") -> dict[str, Any]:
+    return await client.call_tool(user_id, "dineout", "search_restaurants_dineout", details)
+
+
+async def search_groceries(query: str, user_id: str = "demo-user", address_id: str | None = None) -> dict[str, Any]:
+    if not address_id:
+        addresses = await client.call_tool(user_id, "im", "get_addresses", {})
+        address_id = _pick_address_id(addresses, None)
+    return await client.call_tool(
+        user_id,
+        "im",
+        "search_products",
+        {"addressId": address_id, "query": query},
+    )
+
+
 def _pick_address_id(addresses: dict[str, Any], location: str | None) -> str:
     data = addresses.get("data") or addresses.get("content") or addresses.get("result") or []
     if isinstance(data, dict):

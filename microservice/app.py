@@ -68,12 +68,16 @@ async def get_user_context(
     user_id: str = "demo-user",
     prompt: str = "",
     location: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
     address_id: str | None = None,
 ):
     return await context_service.collect(
         user_id=user_id,
         prompt=prompt,
         location=location,
+        latitude=latitude,
+        longitude=longitude,
         address_id=address_id,
     )
 

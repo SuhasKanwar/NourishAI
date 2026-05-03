@@ -31,15 +31,19 @@ class ContextService:
         user_id: str,
         prompt: str = "",
         location: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
         address_id: str | None = None,
         budget_limit: int | None = None,
     ) -> UserContext:
         now = datetime.now(ZoneInfo("Asia/Kolkata"))
-        resolved_location = location or "Bengaluru, India"
-        weather, temperature = await self._weather(resolved_location)
+        resolved_location = location or self._format_location(latitude, longitude)
+        weather, temperature = await self._weather(latitude, longitude)
         return UserContext(
             user_id=user_id,
             location=resolved_location,
+            latitude=latitude,
+            longitude=longitude,
             address_id=address_id,
             meal_type=infer_meal_type(now, prompt),
             local_time=now,
@@ -48,22 +52,47 @@ class ContextService:
             budget_remaining=budget_limit or 1200,
         )
 
-    async def _weather(self, location: str) -> tuple[str, float | None]:
+    async def _weather(self, latitude: float | None, longitude: float | None) -> tuple[str, float | None]:
         settings = get_settings()
-        if not settings.enable_weather_api:
-            return "seasonal", None
+        if not settings.enable_weather_api or latitude is None or longitude is None:
+            return "location weather unavailable", None
         try:
-            return await asyncio.wait_for(self._fetch_weather(location), timeout=3)
+            return await asyncio.wait_for(self._fetch_weather(latitude, longitude), timeout=3)
         except Exception:
-            return "seasonal", None
+            return "weather unavailable", None
 
-    async def _fetch_weather(self, location: str) -> tuple[str, float | None]:
+    async def _fetch_weather(self, latitude: float, longitude: float) -> tuple[str, float | None]:
         settings = get_settings()
         async with httpx.AsyncClient(timeout=2) as client:
             response = await client.get(
-                f"{settings.weather_api_url}/{location}",
-                params={"format": "j1"},
+                settings.weather_api_url,
+                params={
+                    "latitude": latitude,
+                    "longitude": longitude,
+                    "current": "temperature_2m,weather_code",
+                },
             )
             response.raise_for_status()
-            current = response.json()["current_condition"][0]
-            return current["weatherDesc"][0]["value"], float(current["temp_C"])
+            current = response.json()["current"]
+            return _weather_label(int(current.get("weather_code", -1))), float(current["temperature_2m"])
+
+    def _format_location(self, latitude: float | None, longitude: float | None) -> str:
+        if latitude is None or longitude is None:
+            return "Current location unavailable"
+        return f"{latitude:.4f}, {longitude:.4f}"
+
+
+def _weather_label(code: int) -> str:
+    if code == 0:
+        return "clear"
+    if code in {1, 2, 3}:
+        return "partly cloudy"
+    if code in {45, 48}:
+        return "fog"
+    if code in {51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82}:
+        return "rain"
+    if code in {71, 73, 75, 77, 85, 86}:
+        return "snow"
+    if code in {95, 96, 99}:
+        return "thunderstorm"
+    return "weather available"
