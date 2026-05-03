@@ -21,6 +21,12 @@ import {
   Store,
   Utensils,
   WalletCards,
+  X,
+  Bell,
+  ArrowRight,
+  Pizza,
+  UtensilsCrossed,
+  LayoutDashboard,
 } from "lucide-react";
 import axios from "axios";
 
@@ -89,6 +95,12 @@ type LocationState = {
   status: "detecting" | "ready" | "denied" | "unsupported";
 };
 
+type Toast = {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info";
+};
+
 const emptyAgentData: AgentResponse = {
   recommendations: [],
   restaurants: [],
@@ -121,7 +133,17 @@ export default function DashboardPage() {
   const [budgetDialogOpen, setBudgetDialogOpen] = useState(true);
   const [budgetEditing, setBudgetEditing] = useState(false);
   const [budgetSaving, setBudgetSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<"food" | "dineout" | "instamart">("food");
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const autoRequestSent = useRef(false);
+
+  const addToast = (message: string, type: "success" | "error" | "info" = "info") => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((current) => [...current, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((current) => current.filter((t) => t.id !== id));
+    }, 5000);
+  };
 
   useEffect(() => {
     const savedBudget = window.localStorage.getItem("nourishai-monthly-budget");
@@ -356,326 +378,384 @@ export default function DashboardPage() {
           item.id === action.id ? { ...item, status: "completed" } : item,
         ),
       }));
-      setMessages((current) => [...current, { role: "assistant", content: `${action.label} completed.` }]);
-    } catch {
-      setMessages((current) => [
-        ...current,
-        { role: "assistant", content: `${action.label} could not be completed yet.` },
-      ]);
+      addToast(`${action.label} completed.`, "success");
+    } catch (err: any) {
+      addToast(err.response?.data?.message || `${action.label} failed.`, "error");
     } finally {
       setActionLoading(null);
     }
   }
 
   return (
-    <main className="min-h-screen w-full bg-[#070908] px-4 pb-6 pt-24 text-white sm:px-6">
+    <main className="fixed inset-x-0 bottom-0 top-[80px] flex overflow-hidden bg-[#070908] text-white">
+      {/* Toasts */}
+      <div className="fixed right-6 top-[90px] z-[100] flex flex-col gap-3">
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: 20, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 20, scale: 0.9 }}
+              className={`flex items-center gap-3 border border-white/10 px-4 py-3 shadow-2xl ${
+                toast.type === "success" ? "bg-[#0a2e1f] text-[#4ade80]" : 
+                toast.type === "error" ? "bg-[#2e0a0a] text-[#f87171]" : "bg-[#101312] text-white"
+              }`}
+            >
+              {toast.type === "success" ? <Check className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+              <span className="text-sm font-medium">{toast.message}</span>
+              <button onClick={() => setToasts(t => t.filter(x => x.id !== toast.id))} className="ml-2 text-white/40 hover:text-white">
+                <X className="h-3 w-3" />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
       {budgetDialogOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 px-4">
+        <div className="fixed inset-0 z-[110] grid place-items-center bg-black/85 backdrop-blur-sm px-4">
           <motion.section
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-md border border-white/10 bg-[#101312] p-5 shadow-2xl shadow-black/50"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md border border-white/10 bg-[#101312] p-6 shadow-2xl"
           >
-            <div className="mb-5">
-              <p className="flex items-center gap-2 text-sm text-[#f75000]">
+            <div className="mb-6">
+              <p className="flex items-center gap-2 text-sm font-semibold tracking-wider text-[#f75000] uppercase">
                 <WalletCards className="h-4 w-4" />
-                Budget setup
+                Initialize Budget
               </p>
-              <h2 className="mt-2 text-2xl font-semibold">Set your monthly food budget</h2>
-              <p className="mt-2 text-sm leading-6 text-white/55">
-                This is stored in the backend budget table and used to track remaining spend on the dashboard.
+              <h2 className="mt-2 text-2xl font-bold">Set your monthly limit</h2>
+              <p className="mt-2 text-sm leading-6 text-white/50">
+                NourishAI will track your Swiggy orders and Instamart spends against this goal.
               </p>
             </div>
-            <form onSubmit={submitBudget} className="space-y-3">
-              <input
-                autoFocus
-                inputMode="numeric"
-                value={budgetInput}
-                onChange={(event) => setBudgetInput(event.target.value.replace(/\D/g, ""))}
-                className="h-12 w-full border border-white/10 bg-black/30 px-3 text-white outline-none focus:border-[#f75000]"
-                placeholder="12000"
-              />
+            <form onSubmit={submitBudget} className="space-y-4">
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 font-bold">Rs</span>
+                <input
+                  autoFocus
+                  inputMode="numeric"
+                  value={budgetInput}
+                  onChange={(event) => setBudgetInput(event.target.value.replace(/\D/g, ""))}
+                  className="h-14 w-full border border-white/10 bg-black/40 pl-10 pr-4 text-xl font-bold text-white outline-none focus:border-[#f75000] transition-colors"
+                  placeholder="0"
+                />
+              </div>
               <button
                 type="submit"
-                className="inline-flex h-11 w-full items-center justify-center gap-2 bg-[#f75000] px-4 font-semibold text-black transition hover:bg-[#ff7a3d]"
+                className="inline-flex h-12 w-full items-center justify-center gap-2 bg-[#f75000] px-6 font-bold text-black transition hover:bg-[#ff7a3d]"
               >
-                Save and initialize dashboard
+                Launch Dashboard
+                <ArrowRight className="h-4 w-4" />
               </button>
             </form>
           </motion.section>
         </div>
       )}
-      <div className="grid w-full gap-4 2xl:grid-cols-[1fr_420px]">
-        <section className="min-w-0 space-y-4">
-          <motion.section
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="border border-white/10 bg-white/[0.03] p-5"
-          >
-            <div className="grid gap-4 xl:grid-cols-[1fr_760px] xl:items-end">
-              <div>
-                <p className="flex items-center gap-2 text-sm text-[#f75000]">
-                  <Sparkles className="h-4 w-4" />
-                  Live autonomous dashboard
-                </p>
-                <h1 className="mt-2 text-3xl font-semibold sm:text-4xl">Today&apos;s Plan</h1>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-white/58">
-                  {data.ui_patch.todayPlan}. Every card below is driven by the latest agent response and Swiggy MCP data.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                <ContextBadge icon={<CloudSun />} label={data.context.weather} value={formatTemp(data.context.temperature_c)} />
-                <ContextBadge icon={<ChefHat />} label="Meal" value={data.context.meal_type} />
-                <ContextBadge icon={<MapPin />} label="Location" value={data.context.location || location.label || location.status} />
-                <ContextBadge icon={<WalletCards />} label="Budget left" value={remaining ? `Rs ${remaining}` : "Not set"} />
+
+      {/* Sidebar - Left (Stats & Actions) */}
+      <aside className="flex w-80 flex-col border-r border-white/10 bg-[#0a0c0b]">
+        <div className="flex items-center gap-3 border-b border-white/10 p-6">
+          <div className="grid h-10 w-10 place-items-center bg-[#f75000] text-black">
+            <Sparkles className="h-6 w-6" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold">NourishAI</h1>
+            <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Autonomous Dashboard</p>
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-6 overflow-y-auto p-6 scrollbar-hide">
+          {/* Context Stats */}
+          <section className="space-y-3">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/30">Live Context</h3>
+            <div className="grid grid-cols-2 gap-2">
+              <ContextBadge icon={<CloudSun />} label="Weather" value={data.context.weather} />
+              <ContextBadge icon={<ChefHat />} label="Meal" value={data.context.meal_type} />
+              <div className="col-span-2">
+                <ContextBadge icon={<MapPin />} label="Location" value={data.context.location || location.label || "Locating..."} />
               </div>
             </div>
-          </motion.section>
-
-          <section className="grid gap-4 xl:grid-cols-4">
-            <StatCard icon={<ReceiptText />} label="Monthly budget" value={limit ? `Rs ${limit}` : "Not set"} />
-            <StatCard icon={<IndianRupee />} label="Total spent" value={`Rs ${spent}`} />
-            <StatCard icon={<Compass />} label="Location status" value={location.status} />
-            <StatCard icon={<PlugZap />} label="Copilot state" value={data.ui_patch.copilotState ?? "idle"} />
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
-            <div className="space-y-4">
-              <RecommendationSection title="Recommended meals" icon={<Utensils />} items={data.recommendations} empty="No live meal recommendations yet. Connect Swiggy MCP to load original Swiggy data." />
-              <div className="grid gap-4 xl:grid-cols-2">
-                <RecommendationSection title="Restaurants" icon={<Store />} items={data.restaurants} compact empty="No live restaurants returned yet." />
-                <RecommendationSection title="Dineout" icon={<CalendarClock />} items={data.dineouts} compact empty="No live Dineout options returned yet." />
-              </div>
-              <RecommendationSection title="Groceries and Instamart" icon={<ShoppingBasket />} items={data.groceries} compact empty="No live Instamart products returned yet." />
-            </div>
-
-            <aside className="space-y-4">
-              <Panel title="Budget and spend" icon={<WalletCards className="h-4 w-4" />}>
-                <div className="space-y-3">
-                  <div className="flex items-end justify-between gap-3">
-                    <span className="text-sm text-white/55">Usage</span>
-                    <div className="flex items-center gap-2">
-                      <strong className="text-2xl">{usage.toFixed(0)}%</strong>
-                      <button
-                        onClick={() => setBudgetEditing((current) => !current)}
-                        className="border border-white/10 px-2 py-1 text-xs text-white/65 hover:text-white"
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  </div>
-                  <div className="h-2 bg-white/10">
-                    <motion.div className="h-full bg-[#f75000]" animate={{ width: `${usage}%` }} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <MiniStat label="Spent" value={`Rs ${spent}`} />
-                    <MiniStat label="Remaining" value={remaining ? `Rs ${remaining}` : "Not set"} />
-                  </div>
-                  <AnimatePresence>
-                    {budgetEditing && (
-                      <motion.form
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        onSubmit={async (event) => {
-                          event.preventDefault();
-                          const parsedBudget = Number(budgetInput);
-                          if (Number.isFinite(parsedBudget) && parsedBudget > 0) {
-                            await saveBudget(parsedBudget);
-                          }
-                        }}
-                        className="mt-3 flex flex-col gap-2 overflow-hidden border-t border-white/10 pt-3"
-                      >
-                        <label className="text-xs text-white/55">Update Monthly Budget</label>
-                        <div className="flex gap-2">
-                          <input
-                            inputMode="numeric"
-                            value={budgetInput}
-                            onChange={(event) => setBudgetInput(event.target.value.replace(/\D/g, ""))}
-                            className="h-10 min-w-0 flex-1 border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#f75000] rounded-sm transition-colors"
-                            placeholder="Monthly budget"
-                          />
-                          <button
-                            type="submit"
-                            disabled={budgetSaving}
-                            className="h-10 rounded-sm bg-[#f75000] px-4 text-sm font-semibold text-black disabled:opacity-60 transition hover:bg-[#ff7a3d]"
-                          >
-                            {budgetSaving ? "Saving" : "Save"}
-                          </button>
-                        </div>
-                      </motion.form>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </Panel>
-
-              <Panel title="AI actions" icon={<Check className="h-4 w-4" />}>
-                <div className="space-y-3">
-                  {data.actions.length === 0 ? (
-                  <EmptyState text={loading ? "Initializing dashboard from live context." : "No executable actions yet. Connect Swiggy or ask Copilot to plan an order, grocery run, or table booking."} />
-                  ) : (
-                    data.actions.map((action) => (
-                      <div key={action.id} className="border border-white/10 bg-white/[0.03] p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium">{action.label}</p>
-                            <p className="text-xs text-white/45">{action.status.replace("_", " ")}</p>
-                          </div>
-                          <button
-                            onClick={() => runAction(action)}
-                            className="inline-flex h-9 items-center gap-2 bg-white px-3 text-sm font-semibold text-black transition hover:bg-[#ffcfbd]"
-                            disabled={actionLoading === action.id}
-                          >
-                            {actionLoading === action.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                            Approve
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </Panel>
-
-              <Panel title="Reasoning" icon={<Bot className="h-4 w-4" />}>
-                <p className="text-sm leading-6 text-white/62">{data.reasoning}</p>
-              </Panel>
-            </aside>
-          </section>
-        </section>
-
-        <aside className="flex min-h-[760px] flex-col border border-white/10 bg-[#0d100f]">
-          <div className="border-b border-white/10 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <div className="grid h-9 w-9 place-items-center bg-[#f75000] text-black">
-                  <Bot className="h-5 w-5" />
-                </div>
-                <div>
-                  <h2 className="font-semibold">Nourish Copilot</h2>
-                  <p className="text-xs text-white/45">Updates the dashboard, not just chat</p>
-                </div>
-              </div>
-              <button
-                onClick={refreshContext}
-                className="grid h-9 w-9 place-items-center border border-white/10 text-white/60 hover:text-white"
-                title="Refresh context"
-              >
-                <RefreshCw className="h-4 w-4" />
+          {/* Budget Widget */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/30">Budget Tracker</h3>
+              <button onClick={() => setBudgetEditing(!budgetEditing)} className="text-[10px] font-bold text-[#f75000] hover:underline">
+                ADJUST
               </button>
             </div>
-          </div>
+            <div className="border border-white/10 bg-white/[0.02] p-4">
+              <div className="flex items-end justify-between mb-2">
+                <span className="text-2xl font-bold">Rs {remaining}</span>
+                <span className="text-xs text-white/40">of Rs {limit}</span>
+              </div>
+              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${usage}%` }}
+                  className="h-full bg-[#f75000]"
+                />
+              </div>
+              <p className="mt-2 text-[10px] text-white/30 font-medium">You have used {usage.toFixed(1)}% of your limit.</p>
+              
+              <AnimatePresence>
+                {budgetEditing && (
+                  <motion.form
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    onSubmit={async (e) => { e.preventDefault(); await saveBudget(Number(budgetInput)); }}
+                    className="mt-4 space-y-2 overflow-hidden"
+                  >
+                    <input
+                      inputMode="numeric"
+                      value={budgetInput}
+                      onChange={(e) => setBudgetInput(e.target.value.replace(/\D/g, ""))}
+                      className="h-9 w-full border border-white/10 bg-black/40 px-3 text-xs outline-none focus:border-[#f75000]"
+                      placeholder="New budget"
+                    />
+                    <button className="h-9 w-full bg-[#f75000] text-black text-[10px] font-bold">UPDATE</button>
+                  </motion.form>
+                )}
+              </AnimatePresence>
+            </div>
+          </section>
 
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {messages.length === 0 ? (
-              <EmptyState text={monthlyBudget ? "Initializing automatically. You can also ask for live recommendations, Dineout options, restaurants, or groceries." : "Set your monthly budget to initialize the dashboard."} />
-            ) : (
-              messages.map((message, index) => (
-                <motion.div
-                  key={`${message.role}-${index}`}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className={`max-w-[92%] p-3 text-sm leading-6 ${
-                    message.role === "user"
-                      ? "ml-auto bg-[#f75000] text-black"
-                      : "border border-white/10 bg-white/[0.04] text-white/75"
-                  }`}
-                >
+          {/* Pending Actions */}
+          <section className="space-y-3">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-white/30">Pending Actions</h3>
+            <div className="space-y-2">
+              {data.actions.length === 0 ? (
+                <p className="text-xs text-white/20 italic">No actions queued.</p>
+              ) : (
+                data.actions.map((action) => (
+                  <motion.div key={action.id} layout className="group relative border border-white/10 bg-white/[0.03] p-3 transition hover:border-[#f75000]/50">
+                    <p className="text-xs font-bold">{action.label}</p>
+                    <p className="mt-0.5 text-[10px] text-white/40 uppercase tracking-tighter">{action.status}</p>
+                    <button
+                      onClick={() => runAction(action)}
+                      disabled={actionLoading === action.id}
+                      className="mt-3 flex h-8 w-full items-center justify-center gap-2 bg-white text-[10px] font-bold text-black transition hover:bg-[#f75000] hover:text-white"
+                    >
+                      {actionLoading === action.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                      EXECUTE
+                    </button>
+                  </motion.div>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      {/* Main Content - Discovery Area */}
+      <section className="flex flex-1 flex-col bg-[#070908]">
+        {/* Navigation Tabs */}
+        <header className="flex h-16 items-center border-b border-white/10 px-8">
+          <div className="flex h-full gap-8">
+            <TabButton 
+              active={activeTab === "food"} 
+              onClick={() => setActiveTab("food")} 
+              icon={<Pizza />} 
+              label="Food" 
+              count={data.restaurants.length} 
+            />
+            <TabButton 
+              active={activeTab === "dineout"} 
+              onClick={() => setActiveTab("dineout")} 
+              icon={<UtensilsCrossed />} 
+              label="Dineout" 
+              count={data.dineouts.length} 
+            />
+            <TabButton 
+              active={activeTab === "instamart"} 
+              onClick={() => setActiveTab("instamart")} 
+              icon={<ShoppingBasket />} 
+              label="Instamart" 
+              count={data.groceries.length} 
+            />
+          </div>
+        </header>
+
+        {/* Tab Content */}
+        <div className="flex-1 overflow-y-auto p-8 scrollbar-hide">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3"
+            >
+              {activeTab === "food" && (
+                data.restaurants.length > 0 ? (
+                  data.restaurants.map((item) => {
+                    const action = data.actions.find(a => a.payload?.recommendationId === item.id);
+                    return (
+                      <RecommendationCard 
+                        key={item.id} 
+                        item={item} 
+                        onAction={() => action ? runAction(action) : addToast("No action available for this item", "info")} 
+                      />
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full py-20 text-center border border-dashed border-white/10">
+                    <Store className="mx-auto h-12 w-12 text-white/10 mb-4" />
+                    <p className="text-sm text-white/30">No restaurants found for this request.</p>
+                  </div>
+                )
+              )}
+              {activeTab === "dineout" && (
+                data.dineouts.length > 0 ? (
+                  data.dineouts.map((item) => (
+                    <RecommendationCard 
+                      key={item.id} 
+                      item={item} 
+                      onAction={() => addToast("Dineout booking coming soon", "info")} 
+                    />
+                  ))
+                ) : (
+                  <div className="col-span-full py-20 text-center border border-dashed border-white/10">
+                    <CalendarClock className="mx-auto h-12 w-12 text-white/10 mb-4" />
+                    <p className="text-sm text-white/30">No dineout options available.</p>
+                  </div>
+                )
+              )}
+              {activeTab === "instamart" && (
+                data.groceries.length > 0 ? (
+                  data.groceries.map((item) => {
+                    const action = data.actions.find(a => a.payload?.recommendationId === item.id);
+                    return (
+                      <RecommendationCard 
+                        key={item.id} 
+                        item={item} 
+                        onAction={() => action ? runAction(action) : addToast("No action available for this item", "info")} 
+                      />
+                    );
+                  })
+                ) : (
+                  <div className="col-span-full py-20 text-center border border-dashed border-white/10">
+                    <ShoppingBasket className="mx-auto h-12 w-12 text-white/10 mb-4" />
+                    <p className="text-sm text-white/30">Instamart has no matching products.</p>
+                  </div>
+                )
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      </section>
+
+      {/* Chat Sidebar - Right (Copilot) */}
+      <aside className="flex w-96 flex-col border-l border-white/10 bg-[#0d100f]">
+        <div className="flex h-16 items-center justify-between border-b border-white/10 px-6">
+          <div className="flex items-center gap-2">
+            <Bot className="h-5 w-5 text-[#f75000]" />
+            <h2 className="font-bold">Nourish Copilot</h2>
+          </div>
+          <button onClick={refreshContext} className="text-white/40 hover:text-white">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-6 scrollbar-hide">
+          {messages.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center text-center px-6">
+              <Sparkles className="h-10 w-10 text-white/5 mb-4" />
+              <p className="text-sm text-white/30 leading-6">
+                Ask Copilot to find high protein dinner, check grocery deals, or suggest a weekend dineout.
+              </p>
+            </div>
+          ) : (
+            messages.map((message, i) => (
+              <div key={i} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
+                <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                  message.role === "user" ? "bg-[#f75000] text-black font-medium" : "bg-white/5 text-white/80 border border-white/10"
+                }`}>
                   {message.content}
-                </motion.div>
-              ))
-            )}
-            {loading && (
-              <div className="flex items-center gap-2 text-sm text-white/50">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Running live agent pipeline
+                </div>
               </div>
-            )}
-          </div>
+            ))
+          )}
+          {loading && (
+            <div className="flex items-center gap-3 text-xs text-white/30 font-medium italic">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Agent is thinking...
+            </div>
+          )}
+          <div id="chat-end" />
+        </div>
 
-          <div className="border-t border-white/10 p-4">
-            <form onSubmit={submitPrompt} className="space-y-3">
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                className="min-h-28 w-full resize-none border border-white/10 bg-black/30 p-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-[#f75000]"
-                placeholder="Suggest dinner under Rs 200, find healthy restaurants nearby, or book a table tonight"
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 bg-[#f75000] px-4 font-semibold text-black transition hover:bg-[#ff7a3d] disabled:opacity-60"
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Run Copilot
-              </button>
-            </form>
-          </div>
-        </aside>
-      </div>
+        <div className="p-6">
+          <form onSubmit={submitPrompt} className="relative">
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submitPrompt(e as any); } }}
+              className="h-28 w-full resize-none rounded-2xl border border-white/10 bg-black/40 p-4 pb-12 text-sm text-white outline-none focus:border-[#f75000] transition-all"
+              placeholder="Ask anything..."
+            />
+            <button
+              type="submit"
+              disabled={loading || !prompt.trim()}
+              className="absolute bottom-3 right-3 grid h-10 w-10 place-items-center rounded-xl bg-[#f75000] text-black transition hover:bg-[#ff7a3d] disabled:opacity-20"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </form>
+        </div>
+      </aside>
     </main>
   );
 }
 
-function RecommendationSection({
-  title,
-  icon,
-  items,
-  compact = false,
-  empty,
-}: {
-  title: string;
-  icon: ReactNode;
-  items: Recommendation[];
-  compact?: boolean;
-  empty: string;
-}) {
+function TabButton({ active, onClick, icon, label, count }: { active: boolean, onClick: () => void, icon: any, label: string, count: number }) {
   return (
-    <section className="border border-white/10 bg-[#101312] p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <span className="text-[#f75000] [&_svg]:h-5 [&_svg]:w-5">{icon}</span>
-          {title}
-        </h2>
-        <span className="text-xs text-white/45">{items.length} live</span>
-      </div>
-      {items.length === 0 ? (
-        <EmptyState text={empty} />
-      ) : (
-        <div className={compact ? "grid gap-3 md:grid-cols-2 xl:grid-cols-1" : "grid gap-3 xl:grid-cols-2"}>
-          <AnimatePresence mode="popLayout">
-            {items.map((item, index) => (
-              <motion.article
-                layout
-                key={item.id}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ delay: index * 0.03 }}
-                className="border border-white/10 bg-black/20 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-base font-semibold">{item.title}</h3>
-                    <p className="mt-1 truncate text-sm text-white/45">{item.vendor}</p>
-                  </div>
-                  <span className="shrink-0 border border-[#f75000]/35 bg-[#f75000]/10 px-2 py-1 text-xs text-[#ffb28e]">
-                    MCP
-                  </span>
-                </div>
-                <p className="mt-3 line-clamp-2 text-sm leading-6 text-white/62">{item.description}</p>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                  <Metric label="Price" value={`Rs ${item.price}`} />
-                  <Metric label="ETA" value={item.eta_minutes ? `${item.eta_minutes}m` : "--"} />
-                  <Metric label="Rating" value={item.rating?.toFixed(1) ?? "--"} />
-                </div>
-              </motion.article>
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
-    </section>
+    <button 
+      onClick={onClick}
+      className={`relative flex items-center gap-2 h-full text-sm font-bold transition-all ${
+        active ? "text-white" : "text-white/40 hover:text-white/60"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+      <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded-full">{count}</span>
+      {active && <motion.div layoutId="tab-underline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#f75000]" />}
+    </button>
   );
 }
+
+function RecommendationCard({ item, onAction }: { item: Recommendation, onAction: () => void }) {
+  return (
+    <article className="group flex flex-col border border-white/10 bg-white/[0.02] p-5 transition hover:border-[#f75000]/50 hover:bg-white/[0.04]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-base font-bold">{item.title}</h3>
+          <p className="mt-1 truncate text-xs text-white/40 font-medium uppercase tracking-wider">{item.vendor}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-sm font-bold text-[#f75000]">Rs {item.price}</p>
+          <p className="text-[10px] text-white/30 font-bold">{item.eta_minutes || "--"} MIN</p>
+        </div>
+      </div>
+      
+      <p className="mt-4 line-clamp-2 flex-1 text-xs leading-5 text-white/50">{item.description}</p>
+      
+      <div className="mt-5 flex items-center justify-between gap-2 border-t border-white/5 pt-4">
+        <div className="flex items-center gap-1">
+          <Sparkles className="h-3 w-3 text-[#f75000]" />
+          <span className="text-[10px] font-bold text-white/40 uppercase tracking-tighter">Healthy Pick</span>
+        </div>
+        <button onClick={onAction} className="flex items-center gap-2 bg-white px-3 py-1.5 text-[10px] font-bold text-black transition group-hover:bg-[#f75000] group-hover:text-white">
+          SELECT
+        </button>
+      </div>
+    </article>
+  );
+}
+
 
 function ContextBadge({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (

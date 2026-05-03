@@ -6,19 +6,20 @@ access_token = "eyJLSUQiOiI3a2w4OW0wbi0yb3BxLTVyNnMtOHQ5MS11MnYzNHd4NTZ5ejAiLCJh
 
 async def main():
     async with httpx.AsyncClient() as client:
-        r2 = await client.post("https://mcp.swiggy.com/food", json={
+        # Search Instamart
+        r = await client.post("https://mcp.swiggy.com/im", json={
             "jsonrpc": "2.0",
-            "id": 2,
+            "id": 1,
             "method": "tools/call",
             "params": {
-                "name": "search_restaurants",
-                "arguments": {"addressId": "301736076", "query": "thali biryani"}
+                "name": "search_products",
+                "arguments": {"addressId": "301736076", "query": "milk"}
             }
         }, headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream"
         })
-        print(json.dumps(r2.json()))
+        print(json.dumps(r.json()))
 
 asyncio.run(main())

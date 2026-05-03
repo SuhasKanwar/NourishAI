@@ -78,7 +78,7 @@ class NourishAgentOrchestrator:
             dineouts = await self._try_dineouts(request.swiggy_token.get("access_token") if request.swiggy_token else None, query, context)
             groceries = await self._try_groceries(request.swiggy_token.get("access_token") if request.swiggy_token else None, query, context.address_id)
         recommendations = self._health_agent(recommendations)
-        actions = self._actions(recommendations, action_status, auth_required)
+        actions = self._actions(recommendations, action_status, auth_required, context.address_id)
         reasoning = self._reasoning(
             request.prompt,
             context.model_dump(),
@@ -131,7 +131,15 @@ class NourishAgentOrchestrator:
                 }
                 return {"status": "completed", "result": result, "record_action": record_action}
             elif action.type == "order_groceries":
-                result = await order_groceries(action.payload.get("items", []), access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
+                items = action.payload.get("items")
+                if not items and action.payload.get("raw"):
+                    raw = action.payload.get("raw", {})
+                    # Handle Instamart product variations
+                    variations = raw.get("variations", [])
+                    if variations:
+                        items = [{"spinId": variations[0].get("spinId"), "quantity": 1}]
+                
+                result = await order_groceries(items or [], access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
             elif action.type == "book_table":
                 result = await book_table(action.payload, access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
             else:
@@ -179,6 +187,9 @@ class NourishAgentOrchestrator:
         category: str = "meal",
     ) -> list[Recommendation]:
         data = result.get("structuredContent") or result.get("data") or result.get("content") or result.get("result") or result
+        if isinstance(data, dict) and "content" in data:
+            data = data["content"]
+            
         if isinstance(data, list) and data and isinstance(data[0], dict) and data[0].get("type") == "text":
             try:
                 parsed = json.loads(data[0].get("text", "{}"))
@@ -206,9 +217,9 @@ class NourishAgentOrchestrator:
             price = _money(info.get("costForTwo") or info.get("price") or info.get("avgCost"))
             normalized.append(
                 Recommendation(
-                    id=str(info.get("id") or info.get("restaurantId") or f"swiggy-{index}"),
-                    title=str(info.get("name") or info.get("title") or "Swiggy pick"),
-                    vendor=str(info.get("name") or info.get("restaurantName") or "Swiggy"),
+                    id=str(info.get("id") or info.get("restaurantId") or info.get("productId") or f"swiggy-{index}"),
+                    title=str(info.get("name") or info.get("displayName") or info.get("title") or "Swiggy pick"),
+                    vendor=str(info.get("name") or info.get("brand") or info.get("restaurantName") or "Swiggy"),
                     description=str(info.get("cuisines") or info.get("description") or "Available nearby"),
                     price=price,
                     rating=_float(info.get("avgRating") or info.get("rating")),
@@ -240,6 +251,7 @@ class NourishAgentOrchestrator:
         recommendations: list[Recommendation],
         status: str,
         auth_required: bool,
+        address_id: str | None = None,
     ) -> list[DashboardAction]:
         if auth_required:
             return [
@@ -266,9 +278,14 @@ class NourishAgentOrchestrator:
             DashboardAction(
                 id=f"order-{top.id}",
                 label="Order now",
-                type="order_food",
+                type="order_food" if top.category == "restaurant" else "order_groceries",
                 status=status,
-                payload={"recommendationId": top.id, "raw": top.raw, "estimatedPrice": top.price},
+                payload={
+                    "recommendationId": top.id, 
+                    "raw": top.raw, 
+                    "estimatedPrice": top.price,
+                    "addressId": address_id
+                },
             ),
             DashboardAction(
                 id="modify-plan",
@@ -380,5 +397,17 @@ def _money(value: Any) -> int:
         return 0
     if isinstance(value, int | float):
         return int(value)
+    if isinstance(value, dict):
+        # Handle Instamart price structure: {"mrp": 69, "offerPrice": 69}
+        # Or {"mrp": {"amount": 69}}
+        price = value.get("offerPrice") or value.get("mrp") or value.get("price") or 0
+        if isinstance(price, dict):
+            return _money(price.get("amount") or price.get("value") or 0)
+        return _money(price)
+    
+    # Handle list of variations
+    if isinstance(value, list) and value:
+        return _money(value[0])
+
     match = re.search(r"\d+", str(value).replace(",", ""))
     return int(match.group(0)) if match else 0
