@@ -36,6 +36,9 @@ class AgentRunRequest(BaseModel):
     address_id: str | None = None
     monthly_budget: int | None = None
     budget_limit: int | None = None
+    swiggy_token: dict[str, Any] | None = None
+    user_preferences: list[str] = []
+    budget_data: dict[str, Any] | None = None
 
 
 class Recommendation(BaseModel):
@@ -71,11 +74,14 @@ class AgentRunResponse(BaseModel):
     context: UserContext
     budget: dict[str, Any] = {}
     ui_patch: dict[str, Any] = {}
+    new_preference: str | None = None
 
 
 class ActionRunRequest(BaseModel):
     action: DashboardAction
     user_id: str = "demo-user"
+    swiggy_token: dict[str, Any] | None = None
+    budget_data: dict[str, Any] | None = None
 
 
 class BudgetUpdateRequest(BaseModel):

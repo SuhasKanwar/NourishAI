@@ -7,9 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from agents.orchestrator import NourishAgentOrchestrator
-from database import init_db
-from models.schemas import ActionRunRequest, AgentRunRequest, BudgetUpdateRequest, OAuthStartResponse
-from services.budget import BudgetService
+from models.schemas import ActionRunRequest, AgentRunRequest, OAuthStartResponse
 from services.context import ContextService
 from services.oauth import SwiggyOAuthService
 from utils.exception import NourishAIException
@@ -32,12 +30,6 @@ app.add_middleware(
 orchestrator = NourishAgentOrchestrator()
 context_service = ContextService()
 oauth_service = SwiggyOAuthService()
-budget_service = BudgetService()
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
 
 
 @app.get("/", tags=["root"])
@@ -62,7 +54,7 @@ async def run_agent(request: AgentRunRequest):
 
 @app.post("/agent/action", tags=["agent"])
 async def run_action(request: ActionRunRequest):
-    return await orchestrator.execute_action(request.action, user_id=request.user_id)
+    return await orchestrator.execute_action(request)
 
 
 @app.get("/user/context", tags=["user"])
@@ -83,17 +75,6 @@ async def get_user_context(
         address_id=address_id,
     )
 
-
-@app.get("/user/budget", tags=["user"])
-def get_budget(user_id: str = "demo-user"):
-    return budget_service.summary(user_id)
-
-
-@app.put("/user/budget", tags=["user"])
-def update_budget(request: BudgetUpdateRequest):
-    return budget_service.set_monthly_limit(request.user_id, request.monthly_budget)
-
-
 @app.get("/mcp/auth/start", response_model=OAuthStartResponse, tags=["mcp"])
 def start_mcp_auth(user_id: str = "demo-user"):
     try:
@@ -113,7 +94,6 @@ async def mcp_auth_callback(
         return await oauth_service.callback(code=code, state=state)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 @app.exception_handler(NourishAIException)
 async def nourishai_exception_handler(request: fastapi.Request, exc: NourishAIException):

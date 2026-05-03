@@ -22,7 +22,7 @@ import {
   Utensils,
   WalletCards,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import axios from "axios";
 
 type Recommendation = {
   id: string;
@@ -192,9 +192,8 @@ export default function DashboardPage() {
 
   async function refreshContext() {
     try {
-      const response = await api.get("/user/context", {
+      const response = await axios.get("/api/user/context", {
         params: {
-          user_id: "demo-user",
           location: location.label,
           latitude: location.latitude,
           longitude: location.longitude,
@@ -217,9 +216,7 @@ export default function DashboardPage() {
 
   async function loadBudget() {
     try {
-      const response = await api.get("/user/budget", {
-        params: { user_id: "demo-user" },
-      });
+      const response = await axios.get("/api/user/budget");
       setData((current) => ({
         ...current,
         budget: response.data,
@@ -249,9 +246,8 @@ export default function DashboardPage() {
     }
     setLoading(true);
     try {
-      const response = await api.post<AgentResponse>("/agent/run", {
+      const response = await axios.post<AgentResponse>("/api/agent/run", {
         prompt: nextPrompt,
-        user_id: "demo-user",
         location: location.label,
         latitude: location.latitude,
         longitude: location.longitude,
@@ -296,8 +292,7 @@ export default function DashboardPage() {
   async function saveBudget(parsedBudget: number, initializeAfterSave = false) {
     setBudgetSaving(true);
     try {
-      const response = await api.put("/user/budget", {
-        user_id: "demo-user",
+      const response = await axios.put("/api/user/budget", {
         monthly_budget: parsedBudget,
       });
       window.localStorage.setItem("nourishai-monthly-budget", String(parsedBudget));
@@ -334,11 +329,19 @@ export default function DashboardPage() {
   async function runAction(action: DashboardAction) {
     setActionLoading(action.id);
     try {
-      const response = await api.post("/agent/action", {
+      const response = await axios.post("/api/agent/action", {
         action,
-        user_id: "demo-user",
       });
-      const result = response.data as { authorization_url?: string; message?: string; status?: string };
+      const result = response.data as { authorization_url?: string; message?: string; status?: string; intent?: string };
+      
+      if (result.intent === "oauth" || action.payload.intent === "oauth") {
+        const authResponse = await axios.get("/api/mcp/auth/start");
+        if (authResponse.data.authorization_url) {
+          window.location.assign(authResponse.data.authorization_url);
+        }
+        return;
+      }
+
       if (result.authorization_url) {
         window.location.assign(result.authorization_url);
         return;
@@ -468,33 +471,41 @@ export default function DashboardPage() {
                     <MiniStat label="Spent" value={`Rs ${spent}`} />
                     <MiniStat label="Remaining" value={remaining ? `Rs ${remaining}` : "Not set"} />
                   </div>
-                  {budgetEditing && (
-                    <form
-                      onSubmit={async (event) => {
-                        event.preventDefault();
-                        const parsedBudget = Number(budgetInput);
-                        if (Number.isFinite(parsedBudget) && parsedBudget > 0) {
-                          await saveBudget(parsedBudget);
-                        }
-                      }}
-                      className="flex gap-2"
-                    >
-                      <input
-                        inputMode="numeric"
-                        value={budgetInput}
-                        onChange={(event) => setBudgetInput(event.target.value.replace(/\D/g, ""))}
-                        className="h-10 min-w-0 flex-1 border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#f75000]"
-                        placeholder="Monthly budget"
-                      />
-                      <button
-                        type="submit"
-                        disabled={budgetSaving}
-                        className="h-10 bg-white px-3 text-sm font-semibold text-black disabled:opacity-60"
+                  <AnimatePresence>
+                    {budgetEditing && (
+                      <motion.form
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        onSubmit={async (event) => {
+                          event.preventDefault();
+                          const parsedBudget = Number(budgetInput);
+                          if (Number.isFinite(parsedBudget) && parsedBudget > 0) {
+                            await saveBudget(parsedBudget);
+                          }
+                        }}
+                        className="mt-3 flex flex-col gap-2 overflow-hidden border-t border-white/10 pt-3"
                       >
-                        {budgetSaving ? "Saving" : "Save"}
-                      </button>
-                    </form>
-                  )}
+                        <label className="text-xs text-white/55">Update Monthly Budget</label>
+                        <div className="flex gap-2">
+                          <input
+                            inputMode="numeric"
+                            value={budgetInput}
+                            onChange={(event) => setBudgetInput(event.target.value.replace(/\D/g, ""))}
+                            className="h-10 min-w-0 flex-1 border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#f75000] rounded-sm transition-colors"
+                            placeholder="Monthly budget"
+                          />
+                          <button
+                            type="submit"
+                            disabled={budgetSaving}
+                            className="h-10 rounded-sm bg-[#f75000] px-4 text-sm font-semibold text-black disabled:opacity-60 transition hover:bg-[#ff7a3d]"
+                          >
+                            {budgetSaving ? "Saving" : "Save"}
+                          </button>
+                        </div>
+                      </motion.form>
+                    )}
+                  </AnimatePresence>
                 </div>
               </Panel>
 

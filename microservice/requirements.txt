@@ -6,8 +6,6 @@ python-multipart
 httpx
 langchain-core
 langchain-groq
-sqlalchemy
-psycopg2-binary
 faiss-cpu
 numpy
 cryptography

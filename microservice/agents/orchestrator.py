@@ -9,19 +9,16 @@ from langchain_groq import ChatGroq
 from config.settings import get_settings
 from memory.vector_memory import PreferenceMemory
 from models.schemas import AgentRunRequest, AgentRunResponse, DashboardAction, Recommendation
-from services.budget import BudgetService
-from services.context import ContextService
-from services.oauth import SwiggyOAuthService
+
 from tools.swiggy_mcp import SwiggyAuthRequired, search_dineout, search_groceries, search_restaurants
+from services.context import ContextService
 
 
 class NourishAgentOrchestrator:
     def __init__(self) -> None:
         self.context = ContextService()
-        self.budget = BudgetService()
         self.memory = PreferenceMemory()
         self.settings = get_settings()
-        self.oauth = SwiggyOAuthService()
         self.llm = (
             ChatGroq(
                 model=self.settings.groq_model,
@@ -43,12 +40,11 @@ class NourishAgentOrchestrator:
             address_id=request.address_id,
             budget_limit=request.budget_limit,
         )
-        if request.monthly_budget:
-            budget = self.budget.set_monthly_limit(request.user_id, request.monthly_budget)
-        else:
-            budget = self.budget.summary(request.user_id)
-        context.budget_remaining = int(budget["remaining"])
-        self.memory.load(request.user_id)
+        budget = request.budget_data or {"monthly_limit": 12000, "total_spent": 0, "remaining": 12000}
+        if "total_spent" not in budget and "spent" in budget:
+            budget["total_spent"] = budget["spent"]
+        context.budget_remaining = int(budget.get("remaining", 0))
+        self.memory.load(request.user_preferences)
         preferences = self.memory.search(request.prompt)
         plan = await self._planner(request.prompt, context.model_dump(), preferences)
         query = plan.get("search_query") or context.meal_type.value
@@ -61,7 +57,7 @@ class NourishAgentOrchestrator:
             swiggy_result = await search_restaurants(
                 query=query,
                 location=context.location,
-                user_id=request.user_id,
+                access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None,
                 address_id=context.address_id,
             )
             restaurants = self._normalize_recommendations(swiggy_result, request.budget_limit, "restaurant")
@@ -72,13 +68,15 @@ class NourishAgentOrchestrator:
             recommendations = []
             action_status = "requires_auth"
         except Exception as exc:
+            import logging
+            logging.error(f"Error fetching restaurants: {exc}", exc_info=True)
             recommendations = []
             action_status = "suggested"
             plan["tool_warning"] = str(exc)
 
         if not auth_required:
-            dineouts = await self._try_dineouts(request.user_id, query, context)
-            groceries = await self._try_groceries(request.user_id, query, context.address_id)
+            dineouts = await self._try_dineouts(request.swiggy_token.get("access_token") if request.swiggy_token else None, query, context)
+            groceries = await self._try_groceries(request.swiggy_token.get("access_token") if request.swiggy_token else None, query, context.address_id)
         recommendations = self._health_agent(recommendations)
         actions = self._actions(recommendations, action_status, auth_required)
         reasoning = self._reasoning(
@@ -93,11 +91,10 @@ class NourishAgentOrchestrator:
             len(groceries),
         )
 
+        new_preference = None
         if recommendations:
-            self.memory.remember(
-                request.user_id,
-                f"Prompt: {request.prompt}; selected: {recommendations[0].title}; meal: {context.meal_type.value}",
-            )
+            new_preference = f"Prompt: {request.prompt}; selected: {recommendations[0].title}; meal: {context.meal_type.value}"
+            self.memory.remember(new_preference)
 
         return AgentRunResponse(
             recommendations=recommendations,
@@ -110,40 +107,38 @@ class NourishAgentOrchestrator:
             budget=budget,
             ui_patch={
                 "todayPlan": f"{context.meal_type.value.title()} plan updated",
-                "budgetRemaining": budget["remaining"],
-                "totalSpent": budget["total_spent"],
+                "budgetRemaining": budget.get("remaining", 0),
+                "totalSpent": budget.get("total_spent", budget.get("spent", 0)),
                 "copilotState": "ready",
             },
+            new_preference=new_preference,
         )
 
-    async def execute_action(self, action: DashboardAction, user_id: str) -> dict[str, Any]:
+    async def execute_action(self, request: ActionRunRequest) -> dict[str, Any]:
         from tools.swiggy_mcp import book_table, order_groceries, place_food_order
+
+        action = request.action
 
         try:
             if action.payload.get("intent") == "oauth":
-                url, state = self.oauth.authorization_url(user_id)
-                return {"status": "requires_auth", "authorization_url": url, "state": state}
+                return {"status": "requires_auth", "intent": "oauth"}
             if action.type == "order_food":
-                result = await place_food_order(action.payload, user_id=user_id)
-                self.budget.record_action(
-                    user_id,
-                    action.type,
-                    action.payload,
-                    int(action.payload.get("estimatedPrice") or 0),
-                )
+                result = await place_food_order(action.payload, access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
+                record_action = {
+                    "type": action.type,
+                    "payload": action.payload,
+                    "amount": int(action.payload.get("estimatedPrice") or 0)
+                }
+                return {"status": "completed", "result": result, "record_action": record_action}
             elif action.type == "order_groceries":
-                result = await order_groceries(action.payload.get("items", []), user_id=user_id)
+                result = await order_groceries(action.payload.get("items", []), access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
             elif action.type == "book_table":
-                result = await book_table(action.payload, user_id=user_id)
+                result = await book_table(action.payload, access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
             else:
                 result = {"status": "scheduled", "payload": action.payload}
             return {"status": "completed", "result": result}
         except SwiggyAuthRequired:
-            try:
-                url, state = self.oauth.authorization_url(user_id)
-                return {"status": "requires_auth", "authorization_url": url, "state": state}
-            except ValueError as exc:
-                return {"status": "configuration_required", "message": str(exc)}
+            return {"status": "requires_auth", "intent": "oauth"}
         except ValueError as exc:
             return {"status": "configuration_required", "message": str(exc)}
 
@@ -184,27 +179,38 @@ class NourishAgentOrchestrator:
         category: str = "meal",
     ) -> list[Recommendation]:
         data = result.get("data") or result.get("content") or result.get("result") or result
+        if isinstance(data, list) and data and isinstance(data[0], dict) and data[0].get("type") == "text":
+            try:
+                import json
+                parsed = json.loads(data[0].get("text", "{}"))
+                data = parsed.get("data", parsed)
+            except Exception:
+                pass
+
         if isinstance(data, dict):
-            items = data.get("restaurants") or data.get("cards") or data.get("items") or []
+            items = data.get("restaurants") or data.get("cards") or data.get("items") or data.get("products") or []
         else:
             items = data if isinstance(data, list) else []
         normalized: list[Recommendation] = []
         for index, item in enumerate(items[:12]):
             if not isinstance(item, dict):
                 continue
-            status = str(item.get("availabilityStatus", "OPEN")).upper()
-            if status not in {"OPEN", ""}:
+            
+            info = item.get("info") or item
+            
+            status = str(info.get("availabilityStatus") or info.get("availability", {}).get("opened", True)).upper()
+            if status in {"CLOSED", "FALSE"}:
                 continue
-            price = _money(item.get("costForTwo") or item.get("price") or item.get("avgCost"))
+            price = _money(info.get("costForTwo") or info.get("price") or info.get("avgCost"))
             normalized.append(
                 Recommendation(
-                    id=str(item.get("id") or item.get("restaurantId") or f"swiggy-{index}"),
-                    title=str(item.get("name") or item.get("title") or "Swiggy pick"),
-                    vendor=str(item.get("name") or item.get("restaurantName") or "Swiggy"),
-                    description=str(item.get("cuisines") or item.get("description") or "Available nearby"),
+                    id=str(info.get("id") or info.get("restaurantId") or f"swiggy-{index}"),
+                    title=str(info.get("name") or info.get("title") or "Swiggy pick"),
+                    vendor=str(info.get("name") or info.get("restaurantName") or "Swiggy"),
+                    description=str(info.get("cuisines") or info.get("description") or "Available nearby"),
                     price=price,
-                    rating=_float(item.get("avgRating") or item.get("rating")),
-                    eta_minutes=_int(item.get("sla") or item.get("deliveryTime") or item.get("etaMinutes")),
+                    rating=_float(info.get("avgRating") or info.get("rating")),
+                    eta_minutes=_int(info.get("sla", {}).get("deliveryTime") or info.get("deliveryTime") or info.get("etaMinutes")),
                     tags=["open", "nearby", "Swiggy MCP"],
                     category=category,  # type: ignore[arg-type]
                     source="swiggy",
@@ -299,7 +305,7 @@ class NourishAgentOrchestrator:
             f"Preference memory considered {len(preferences)} prior signals."
         )
 
-    async def _try_dineouts(self, user_id: str, query: str, context: Any) -> list[Recommendation]:
+    async def _try_dineouts(self, access_token: str | None, query: str, context: Any) -> list[Recommendation]:
         try:
             result = await search_dineout(
                 {
@@ -308,22 +314,26 @@ class NourishAgentOrchestrator:
                     "latitude": context.latitude,
                     "longitude": context.longitude,
                 },
-                user_id=user_id,
+                access_token=access_token,
             )
             return self._normalize_recommendations(result, None, "dineout")
-        except Exception:
+        except Exception as exc:
+            import logging
+            logging.error(f"Error fetching dineouts: {exc}", exc_info=True)
             return []
 
     async def _try_groceries(
         self,
-        user_id: str,
+        access_token: str | None,
         query: str,
         address_id: str | None,
     ) -> list[Recommendation]:
         try:
-            result = await search_groceries(query=query, user_id=user_id, address_id=address_id)
+            result = await search_groceries(query=query, access_token=access_token, address_id=address_id)
             return self._normalize_recommendations(result, None, "grocery")
-        except Exception:
+        except Exception as exc:
+            import logging
+            logging.error(f"Error fetching groceries: {exc}", exc_info=True)
             return []
 
     def _extract_budget(self, prompt: str) -> int | None:

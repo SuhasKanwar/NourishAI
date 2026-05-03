@@ -16,7 +16,7 @@ class Settings:
     swiggy_client_id: str | None = os.getenv("SWIGGY_CLIENT_ID")
     swiggy_redirect_uri: str = os.getenv(
         "SWIGGY_REDIRECT_URI",
-        "http://localhost:8000/mcp/auth/callback",
+        "http://localhost:3000/api/mcp/auth/callback",
     )
     swiggy_scopes: str = os.getenv(
         "SWIGGY_SCOPES",

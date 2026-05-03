@@ -8,7 +8,6 @@ from urllib.parse import urlencode
 import httpx
 
 from config.settings import get_settings
-from services.token_store import TokenStore
 
 
 _pkce_sessions: dict[str, dict[str, str]] = {}
@@ -22,7 +21,6 @@ def _challenge(verifier: str) -> str:
 class SwiggyOAuthService:
     def __init__(self) -> None:
         self.settings = get_settings()
-        self.tokens = TokenStore()
 
     def authorization_url(self, user_id: str) -> tuple[str, str]:
         if not self.settings.swiggy_client_id:
@@ -60,11 +58,10 @@ class SwiggyOAuthService:
             )
             response.raise_for_status()
             payload = response.json()
-        self.tokens.save(
-            user_id=session["user_id"],
-            access_token=payload["access_token"],
-            expires_in=int(payload.get("expires_in", 432000)),
-            scope=payload.get("scope"),
-            refresh_token=payload.get("refresh_token"),
-        )
-        return {"status": "connected", "scope": payload.get("scope", "")}
+        return {
+            "status": "connected",
+            "access_token": payload["access_token"],
+            "expires_in": int(payload.get("expires_in", 432000)),
+            "scope": payload.get("scope"),
+            "refresh_token": payload.get("refresh_token"),
+        }

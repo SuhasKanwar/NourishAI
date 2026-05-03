@@ -6,7 +6,6 @@ from typing import Iterable
 import faiss
 import numpy as np
 
-from database import SessionLocal, UserPreference
 
 
 class PreferenceMemory:
@@ -15,24 +14,15 @@ class PreferenceMemory:
         self.index = faiss.IndexFlatIP(dimensions)
         self.texts: list[str] = []
 
-    def load(self, user_id: str) -> None:
-        with SessionLocal() as session:
-            preferences = (
-                session.query(UserPreference)
-                .filter(UserPreference.user_id == user_id)
-                .order_by(UserPreference.created_at.desc())
-                .limit(200)
-                .all()
-            )
-        self.texts = [p.text for p in preferences]
+    def load(self, preferences: list[str]) -> None:
+        self.texts = preferences
         self.index = faiss.IndexFlatIP(self.dimensions)
         if self.texts:
             self.index.add(np.array([self._embed(text) for text in self.texts], dtype="float32"))
 
-    def remember(self, user_id: str, text: str) -> None:
-        with SessionLocal() as session:
-            session.add(UserPreference(user_id=user_id, text=text))
-            session.commit()
+    def remember(self, text: str) -> None:
+        self.texts.append(text)
+        self.index.add(np.array([self._embed(text)], dtype="float32"))
 
     def search(self, query: str, k: int = 4) -> list[str]:
         if not self.texts:
