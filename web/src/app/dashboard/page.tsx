@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Bot,
@@ -115,15 +115,30 @@ export default function DashboardPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [location, setLocation] = useState<LocationState>(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      return { status: "unsupported", label: "Browser location unavailable" };
-    }
-    return { status: "detecting" };
-  });
+  const [location, setLocation] = useState<LocationState>({ status: "detecting" });
+  const [budgetInput, setBudgetInput] = useState("");
+  const [monthlyBudget, setMonthlyBudget] = useState<number | null>(null);
+  const [budgetDialogOpen, setBudgetDialogOpen] = useState(true);
+  const [budgetEditing, setBudgetEditing] = useState(false);
+  const [budgetSaving, setBudgetSaving] = useState(false);
+  const autoRequestSent = useRef(false);
 
   useEffect(() => {
+    const savedBudget = window.localStorage.getItem("nourishai-monthly-budget");
+    if (savedBudget) {
+      const parsedBudget = Number(savedBudget);
+      if (Number.isFinite(parsedBudget) && parsedBudget > 0) {
+        setTimeout(() => {
+          setMonthlyBudget(parsedBudget);
+          setBudgetInput(String(parsedBudget));
+          setBudgetDialogOpen(false);
+        }, 0);
+      }
+    }
     if (!navigator.geolocation) {
+      setTimeout(() => {
+        setLocation({ status: "unsupported", label: "Browser location unavailable" });
+      }, 0);
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -146,6 +161,25 @@ export default function DashboardPage() {
     refreshContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.status]);
+
+  useEffect(() => {
+    setTimeout(() => {
+      void loadBudget();
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    if (autoRequestSent.current || !monthlyBudget || location.status === "detecting") return;
+    autoRequestSent.current = true;
+    setTimeout(() => {
+      void runAgent(
+        "Build today's plan using my live location, time, weather, budget, Swiggy restaurants, Dineout, and Instamart.",
+        monthlyBudget,
+        true,
+      );
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monthlyBudget, location.status]);
 
   const budget = data.budget;
   const spent = budget.total_spent ?? data.ui_patch.totalSpent ?? 0;
@@ -181,11 +215,38 @@ export default function DashboardPage() {
     }
   }
 
-  async function submitPrompt(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!prompt.trim() || loading) return;
-    const nextPrompt = prompt.trim();
-    setMessages((current) => [...current, { role: "user", content: nextPrompt }]);
+  async function loadBudget() {
+    try {
+      const response = await api.get("/user/budget", {
+        params: { user_id: "demo-user" },
+      });
+      setData((current) => ({
+        ...current,
+        budget: response.data,
+        context: {
+          ...current.context,
+          budget_remaining: response.data.remaining ?? current.context.budget_remaining,
+        },
+        ui_patch: {
+          ...current.ui_patch,
+          budgetRemaining: response.data.remaining,
+          totalSpent: response.data.total_spent,
+        },
+      }));
+      if (response.data.monthly_limit) {
+        setMonthlyBudget(response.data.monthly_limit);
+        setBudgetInput(String(response.data.monthly_limit));
+      }
+    } catch {
+      // The first agent run will still create the budget row if the service is available.
+    }
+  }
+
+  async function runAgent(nextPrompt: string, budget?: number | null, silent = false) {
+    if (!nextPrompt.trim() || loading) return;
+    if (!silent) {
+      setMessages((current) => [...current, { role: "user", content: nextPrompt }]);
+    }
     setLoading(true);
     try {
       const response = await api.post<AgentResponse>("/agent/run", {
@@ -194,11 +255,17 @@ export default function DashboardPage() {
         location: location.label,
         latitude: location.latitude,
         longitude: location.longitude,
+        monthly_budget: budget ?? monthlyBudget,
       });
       setData(response.data);
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: response.data.reasoning },
+        {
+          role: "assistant",
+          content: silent
+            ? `Dashboard initialized. ${response.data.reasoning}`
+            : response.data.reasoning,
+        },
       ]);
     } catch {
       setMessages((current) => [
@@ -214,6 +281,56 @@ export default function DashboardPage() {
     }
   }
 
+  async function submitPrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runAgent(prompt);
+  }
+
+  async function submitBudget(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsedBudget = Number(budgetInput);
+    if (!Number.isFinite(parsedBudget) || parsedBudget <= 0) return;
+    await saveBudget(parsedBudget, true);
+  }
+
+  async function saveBudget(parsedBudget: number, initializeAfterSave = false) {
+    setBudgetSaving(true);
+    try {
+      const response = await api.put("/user/budget", {
+        user_id: "demo-user",
+        monthly_budget: parsedBudget,
+      });
+      window.localStorage.setItem("nourishai-monthly-budget", String(parsedBudget));
+      setMonthlyBudget(parsedBudget);
+      setBudgetInput(String(parsedBudget));
+      setData((current) => ({
+        ...current,
+        budget: response.data,
+        context: {
+          ...current.context,
+          budget_remaining: response.data.remaining ?? current.context.budget_remaining,
+        },
+        ui_patch: {
+          ...current.ui_patch,
+          budgetRemaining: response.data.remaining,
+          totalSpent: response.data.total_spent,
+        },
+      }));
+      setBudgetDialogOpen(false);
+      setBudgetEditing(false);
+      if (initializeAfterSave && !autoRequestSent.current && location.status !== "detecting") {
+        autoRequestSent.current = true;
+        await runAgent(
+          "Build today's plan using my live location, time, weather, budget, Swiggy restaurants, Dineout, and Instamart.",
+          parsedBudget,
+          true,
+        );
+      }
+    } finally {
+      setBudgetSaving(false);
+    }
+  }
+
   async function runAction(action: DashboardAction) {
     setActionLoading(action.id);
     try {
@@ -221,9 +338,13 @@ export default function DashboardPage() {
         action,
         user_id: "demo-user",
       });
-      const result = response.data as { authorization_url?: string };
+      const result = response.data as { authorization_url?: string; message?: string; status?: string };
       if (result.authorization_url) {
         window.location.assign(result.authorization_url);
+        return;
+      }
+      if (result.message) {
+        setMessages((current) => [...current, { role: "assistant", content: result.message ?? "" }]);
         return;
       }
       setData((current) => ({
@@ -245,6 +366,42 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen w-full bg-[#070908] px-4 pb-6 pt-24 text-white sm:px-6">
+      {budgetDialogOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 px-4">
+          <motion.section
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-md border border-white/10 bg-[#101312] p-5 shadow-2xl shadow-black/50"
+          >
+            <div className="mb-5">
+              <p className="flex items-center gap-2 text-sm text-[#f75000]">
+                <WalletCards className="h-4 w-4" />
+                Budget setup
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold">Set your monthly food budget</h2>
+              <p className="mt-2 text-sm leading-6 text-white/55">
+                This is stored in the backend budget table and used to track remaining spend on the dashboard.
+              </p>
+            </div>
+            <form onSubmit={submitBudget} className="space-y-3">
+              <input
+                autoFocus
+                inputMode="numeric"
+                value={budgetInput}
+                onChange={(event) => setBudgetInput(event.target.value.replace(/\D/g, ""))}
+                className="h-12 w-full border border-white/10 bg-black/30 px-3 text-white outline-none focus:border-[#f75000]"
+                placeholder="12000"
+              />
+              <button
+                type="submit"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 bg-[#f75000] px-4 font-semibold text-black transition hover:bg-[#ff7a3d]"
+              >
+                Save and initialize dashboard
+              </button>
+            </form>
+          </motion.section>
+        </div>
+      )}
       <div className="grid w-full gap-4 2xl:grid-cols-[1fr_420px]">
         <section className="min-w-0 space-y-4">
           <motion.section
@@ -281,7 +438,7 @@ export default function DashboardPage() {
 
           <section className="grid gap-4 xl:grid-cols-[1fr_360px]">
             <div className="space-y-4">
-              <RecommendationSection title="Recommended meals" icon={<Utensils />} items={data.recommendations} empty="No live meal recommendations yet. Ask Copilot after connecting Swiggy." />
+              <RecommendationSection title="Recommended meals" icon={<Utensils />} items={data.recommendations} empty="No live meal recommendations yet. Connect Swiggy MCP to load original Swiggy data." />
               <div className="grid gap-4 xl:grid-cols-2">
                 <RecommendationSection title="Restaurants" icon={<Store />} items={data.restaurants} compact empty="No live restaurants returned yet." />
                 <RecommendationSection title="Dineout" icon={<CalendarClock />} items={data.dineouts} compact empty="No live Dineout options returned yet." />
@@ -292,9 +449,17 @@ export default function DashboardPage() {
             <aside className="space-y-4">
               <Panel title="Budget and spend" icon={<WalletCards className="h-4 w-4" />}>
                 <div className="space-y-3">
-                  <div className="flex items-end justify-between">
+                  <div className="flex items-end justify-between gap-3">
                     <span className="text-sm text-white/55">Usage</span>
-                    <strong className="text-2xl">{usage.toFixed(0)}%</strong>
+                    <div className="flex items-center gap-2">
+                      <strong className="text-2xl">{usage.toFixed(0)}%</strong>
+                      <button
+                        onClick={() => setBudgetEditing((current) => !current)}
+                        className="border border-white/10 px-2 py-1 text-xs text-white/65 hover:text-white"
+                      >
+                        Edit
+                      </button>
+                    </div>
                   </div>
                   <div className="h-2 bg-white/10">
                     <motion.div className="h-full bg-[#f75000]" animate={{ width: `${usage}%` }} />
@@ -303,13 +468,40 @@ export default function DashboardPage() {
                     <MiniStat label="Spent" value={`Rs ${spent}`} />
                     <MiniStat label="Remaining" value={remaining ? `Rs ${remaining}` : "Not set"} />
                   </div>
+                  {budgetEditing && (
+                    <form
+                      onSubmit={async (event) => {
+                        event.preventDefault();
+                        const parsedBudget = Number(budgetInput);
+                        if (Number.isFinite(parsedBudget) && parsedBudget > 0) {
+                          await saveBudget(parsedBudget);
+                        }
+                      }}
+                      className="flex gap-2"
+                    >
+                      <input
+                        inputMode="numeric"
+                        value={budgetInput}
+                        onChange={(event) => setBudgetInput(event.target.value.replace(/\D/g, ""))}
+                        className="h-10 min-w-0 flex-1 border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#f75000]"
+                        placeholder="Monthly budget"
+                      />
+                      <button
+                        type="submit"
+                        disabled={budgetSaving}
+                        className="h-10 bg-white px-3 text-sm font-semibold text-black disabled:opacity-60"
+                      >
+                        {budgetSaving ? "Saving" : "Save"}
+                      </button>
+                    </form>
+                  )}
                 </div>
               </Panel>
 
               <Panel title="AI actions" icon={<Check className="h-4 w-4" />}>
                 <div className="space-y-3">
                   {data.actions.length === 0 ? (
-                    <EmptyState text="No executable actions yet. Ask Copilot to plan an order, grocery run, or table booking." />
+                  <EmptyState text={loading ? "Initializing dashboard from live context." : "No executable actions yet. Connect Swiggy or ask Copilot to plan an order, grocery run, or table booking."} />
                   ) : (
                     data.actions.map((action) => (
                       <div key={action.id} className="border border-white/10 bg-white/[0.03] p-3">
@@ -364,7 +556,7 @@ export default function DashboardPage() {
 
           <div className="flex-1 space-y-3 overflow-y-auto p-4">
             {messages.length === 0 ? (
-              <EmptyState text="Ask for live recommendations, budget changes, Dineout options, restaurants, or groceries." />
+              <EmptyState text={monthlyBudget ? "Initializing automatically. You can also ask for live recommendations, Dineout options, restaurants, or groceries." : "Set your monthly budget to initialize the dashboard."} />
             ) : (
               messages.map((message, index) => (
                 <motion.div

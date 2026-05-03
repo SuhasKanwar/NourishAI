@@ -8,7 +8,8 @@ from fastapi.responses import JSONResponse
 
 from agents.orchestrator import NourishAgentOrchestrator
 from database import init_db
-from models.schemas import ActionRunRequest, AgentRunRequest, OAuthStartResponse
+from models.schemas import ActionRunRequest, AgentRunRequest, BudgetUpdateRequest, OAuthStartResponse
+from services.budget import BudgetService
 from services.context import ContextService
 from services.oauth import SwiggyOAuthService
 from utils.exception import NourishAIException
@@ -31,6 +32,7 @@ app.add_middleware(
 orchestrator = NourishAgentOrchestrator()
 context_service = ContextService()
 oauth_service = SwiggyOAuthService()
+budget_service = BudgetService()
 
 
 @app.on_event("startup")
@@ -80,6 +82,16 @@ async def get_user_context(
         longitude=longitude,
         address_id=address_id,
     )
+
+
+@app.get("/user/budget", tags=["user"])
+def get_budget(user_id: str = "demo-user"):
+    return budget_service.summary(user_id)
+
+
+@app.put("/user/budget", tags=["user"])
+def update_budget(request: BudgetUpdateRequest):
+    return budget_service.set_monthly_limit(request.user_id, request.monthly_budget)
 
 
 @app.get("/mcp/auth/start", response_model=OAuthStartResponse, tags=["mcp"])

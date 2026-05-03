@@ -34,6 +34,7 @@ class AgentRunRequest(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     address_id: str | None = None
+    monthly_budget: int | None = None
     budget_limit: int | None = None
 
 
@@ -75,6 +76,11 @@ class AgentRunResponse(BaseModel):
 class ActionRunRequest(BaseModel):
     action: DashboardAction
     user_id: str = "demo-user"
+
+
+class BudgetUpdateRequest(BaseModel):
+    user_id: str = "demo-user"
+    monthly_budget: int = Field(..., gt=0)
 
 
 class OAuthStartResponse(BaseModel):

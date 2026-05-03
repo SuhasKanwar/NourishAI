@@ -43,8 +43,8 @@ class NourishAgentOrchestrator:
             address_id=request.address_id,
             budget_limit=request.budget_limit,
         )
-        if request.budget_limit:
-            budget = self.budget.set_monthly_limit(request.user_id, request.budget_limit)
+        if request.monthly_budget:
+            budget = self.budget.set_monthly_limit(request.user_id, request.monthly_budget)
         else:
             budget = self.budget.summary(request.user_id)
         context.budget_remaining = int(budget["remaining"])
