@@ -178,17 +178,19 @@ class NourishAgentOrchestrator:
         budget_limit: int | None,
         category: str = "meal",
     ) -> list[Recommendation]:
-        data = result.get("data") or result.get("content") or result.get("result") or result
+        data = result.get("structuredContent") or result.get("data") or result.get("content") or result.get("result") or result
         if isinstance(data, list) and data and isinstance(data[0], dict) and data[0].get("type") == "text":
             try:
-                import json
                 parsed = json.loads(data[0].get("text", "{}"))
-                data = parsed.get("data", parsed)
+                if not parsed.get("success", True) or "error" in parsed:
+                    import logging
+                    logging.error(f"MCP Tool Payload Error: {parsed}")
+                data = parsed.get("structuredContent") or parsed.get("data") or parsed
             except Exception:
                 pass
 
         if isinstance(data, dict):
-            items = data.get("restaurants") or data.get("cards") or data.get("items") or data.get("products") or []
+            items = data.get("restaurants") or data.get("cards") or data.get("items") or data.get("products") or data.get("addresses") or []
         else:
             items = data if isinstance(data, list) else []
         normalized: list[Recommendation] = []

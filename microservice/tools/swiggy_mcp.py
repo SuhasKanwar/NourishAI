@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import itertools
+import json
+import re
 from typing import Any, Literal
 
 import httpx
@@ -45,7 +47,7 @@ class SwiggyMCPClient:
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json",
-                    "Accept": "application/json",
+                    "Accept": "application/json, text/event-stream",
                 },
                 json=payload,
             )
@@ -157,12 +159,11 @@ async def search_groceries(query: str, access_token: str | None = None, address_
 
 
 def _pick_address_id(addresses: dict[str, Any], location: str | None) -> str:
-    data = addresses.get("data") or addresses.get("content") or addresses.get("result") or []
+    data = addresses.get("structuredContent") or addresses.get("data") or addresses.get("content") or addresses.get("result") or []
     if isinstance(data, list) and data and isinstance(data[0], dict) and data[0].get("type") == "text":
         try:
-            import json
             parsed = json.loads(data[0].get("text", "{}"))
-            data = parsed.get("data", parsed)
+            data = parsed.get("structuredContent") or parsed.get("data") or parsed
         except Exception:
             pass
             
