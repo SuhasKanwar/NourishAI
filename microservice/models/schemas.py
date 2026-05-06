@@ -51,15 +51,16 @@ class Recommendation(BaseModel):
     rating: float | None = None
     eta_minutes: int | None = None
     tags: list[str] = []
-    category: Literal["meal", "restaurant", "dineout", "grocery"] = "meal"
+    category: Literal["meal", "restaurant", "dineout", "grocery", "menu_item"] = "meal"
     source: Literal["swiggy"] = "swiggy"
+    image_url: str | None = None
     raw: dict[str, Any] = {}
 
 
 class DashboardAction(BaseModel):
     id: str
     label: str
-    type: Literal["order_food", "order_groceries", "book_table", "schedule", "modify"]
+    type: Literal["order_food", "order_groceries", "book_table", "schedule", "modify", "view_menu", "add_to_cart", "view_cart", "checkout", "track"]
     status: Literal["suggested", "requires_auth", "ready", "scheduled", "completed"] = "suggested"
     payload: dict[str, Any] = {}
 

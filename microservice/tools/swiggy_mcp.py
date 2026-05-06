@@ -108,6 +108,24 @@ async def search_restaurants(
     )
 
 
+async def search_menu(
+    query: str,
+    address_id: str,
+    restaurant_id: str | None = None,
+    veg_filter: int | None = None,
+    offset: int | None = None,
+    access_token: str | None = None,
+) -> dict[str, Any]:
+    args: dict[str, Any] = {"query": query, "addressId": address_id}
+    if restaurant_id:
+        args["restaurantIdOfAddedItem"] = restaurant_id
+    if veg_filter is not None:
+        args["vegFilter"] = veg_filter
+    if offset is not None:
+        args["offset"] = offset
+    return await client.call_tool(access_token, "food", "search_menu", args)
+
+
 async def get_menu(
     restaurant_id: str,
     access_token: str | None = None,
@@ -221,3 +239,67 @@ async def order_groceries_tool(items: list[dict[str, Any]], access_token: str | 
 async def book_table_tool(details: dict[str, Any], access_token: str | None = None) -> dict[str, Any]:
     """Book a restaurant table through Swiggy Dineout."""
     return await book_table(details=details, access_token=access_token)
+
+@tool
+async def get_addresses_tool(access_token: str | None = None) -> dict[str, Any]:
+    """Get all saved delivery addresses for the authenticated Swiggy user."""
+    return await client.call_tool(access_token, "food", "get_addresses", {})
+
+@tool
+async def search_menu_tool(query: str, address_id: str, restaurant_id: str | None = None, veg_filter: int | None = None, offset: int | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Search for dishes and menu items to order for food delivery."""
+    args: dict[str, Any] = {"query": query, "addressId": address_id}
+    if restaurant_id: args["restaurantIdOfAddedItem"] = restaurant_id
+    if veg_filter is not None: args["vegFilter"] = veg_filter
+    if offset is not None: args["offset"] = offset
+    return await client.call_tool(access_token, "food", "search_menu", args)
+
+@tool
+async def apply_food_coupon_tool(coupon_code: str, address_id: str, cart_id: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Apply coupon code or discount to food delivery order."""
+    args: dict[str, Any] = {"couponCode": coupon_code, "addressId": address_id}
+    if cart_id: args["cartId"] = cart_id
+    return await client.call_tool(access_token, "food", "apply_food_coupon", args)
+
+@tool
+async def fetch_food_coupons_tool(restaurant_id: str, address_id: str, coupon_code: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Get available coupons and offers for food delivery order."""
+    args: dict[str, Any] = {"restaurantId": restaurant_id, "addressId": address_id}
+    if coupon_code: args["couponCode"] = coupon_code
+    return await client.call_tool(access_token, "food", "fetch_food_coupons", args)
+
+@tool
+async def flush_food_cart_tool(access_token: str | None = None) -> dict[str, Any]:
+    """Clear or empty the food delivery cart."""
+    return await client.call_tool(access_token, "food", "flush_food_cart", {})
+
+@tool
+async def get_food_cart_tool(address_id: str, restaurant_name: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Get current food delivery cart with all items."""
+    args: dict[str, Any] = {"addressId": address_id}
+    if restaurant_name: args["restaurantName"] = restaurant_name
+    return await client.call_tool(access_token, "food", "get_food_cart", args)
+
+@tool
+async def update_food_cart_tool(restaurant_id: str, cart_items: list[dict[str, Any]], address_id: str, restaurant_name: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Add items to food delivery cart or update cart contents."""
+    args: dict[str, Any] = {"restaurantId": restaurant_id, "cartItems": cart_items, "addressId": address_id}
+    if restaurant_name: args["restaurantName"] = restaurant_name
+    return await client.call_tool(access_token, "food", "update_food_cart", args)
+
+@tool
+async def get_food_order_details_tool(order_id: str, access_token: str | None = None) -> dict[str, Any]:
+    """Get detailed information about a specific food delivery order."""
+    return await client.call_tool(access_token, "food", "get_food_order_details", {"orderId": order_id})
+
+@tool
+async def get_food_orders_tool(address_id: str, order_count: int | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Get active food delivery orders and order status."""
+    args: dict[str, Any] = {"addressId": address_id}
+    if order_count: args["orderCount"] = order_count
+    return await client.call_tool(access_token, "food", "get_food_orders", args)
+
+@tool
+async def track_food_order_tool(order_id: str, access_token: str | None = None) -> dict[str, Any]:
+    """Track food delivery order status and delivery progress."""
+    return await client.call_tool(access_token, "food", "track_food_order", {"orderId": order_id})

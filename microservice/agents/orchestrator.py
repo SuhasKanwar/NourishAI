@@ -10,7 +10,7 @@ from config.settings import get_settings
 from memory.vector_memory import PreferenceMemory
 from models.schemas import AgentRunRequest, AgentRunResponse, DashboardAction, Recommendation
 
-from tools.swiggy_mcp import SwiggyAuthRequired, search_dineout, search_groceries, search_restaurants
+from tools.swiggy_mcp import SwiggyAuthRequired, search_dineout, search_groceries, search_restaurants, search_menu
 from services.context import ContextService
 
 
@@ -54,12 +54,20 @@ class NourishAgentOrchestrator:
         groceries: list[Recommendation] = []
 
         try:
-            swiggy_result = await search_restaurants(
+            swiggy_result = await search_menu(
                 query=query,
-                location=context.location,
-                access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None,
                 address_id=context.address_id,
+                access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None,
             )
+            # Fallback to search_restaurants if no dishes found
+            if not swiggy_result.get("data", {}).get("items"):
+                 swiggy_result = await search_restaurants(
+                    query=query,
+                    location=context.location,
+                    access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None,
+                    address_id=context.address_id,
+                )
+            
             restaurants = self._normalize_recommendations(swiggy_result, request.budget_limit, "restaurant")
             recommendations = self._budget_agent(restaurants, context.budget_remaining)
             action_status = "ready"
@@ -122,8 +130,116 @@ class NourishAgentOrchestrator:
         try:
             if action.payload.get("intent") == "oauth":
                 return {"status": "requires_auth", "intent": "oauth"}
-            if action.type == "order_food":
-                result = await place_food_order(action.payload, access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
+            if action.type == "view_menu":
+                from tools.swiggy_mcp import get_menu
+                restaurant_id = action.payload.get("recommendationId")
+                address_id = action.payload.get("addressId")
+                # Use search_menu with empty query and restaurantId to get items as fallback or primary
+                menu_data = await search_menu("", address_id=address_id, restaurant_id=restaurant_id, access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None)
+                if not menu_data.get("data", {}).get("items"):
+                    from tools.swiggy_mcp import get_menu
+                    menu_data = await get_menu(restaurant_id, access_token=request.swiggy_token.get("access_token") if request.swiggy_token else None, address_id=address_id)
+                menu_items = self._normalize_recommendations(menu_data, None, "menu_item")
+                actions = []
+                for mi in menu_items:
+                    mi.raw["restaurantId"] = restaurant_id
+                    actions.append(DashboardAction(
+                        id=f"add-{mi.id}",
+                        label="Add to Cart",
+                        type="add_to_cart",
+                        status="ready",
+                        payload={"recommendationId": mi.id, "raw": mi.raw, "estimatedPrice": mi.price, "restaurantId": restaurant_id, "addressId": action.payload.get("addressId")}
+                    ))
+                actions.append(DashboardAction(
+                    id="checkout",
+                    label="Checkout Order",
+                    type="order_food",
+                    status="ready",
+                    payload={"restaurantId": restaurant_id, "addressId": action.payload.get("addressId")}
+                ))
+                return {
+                    "status": "completed",
+                    "data": {
+                        "menu": [m.model_dump() for m in menu_items],
+                        "actions": [a.model_dump() for a in actions],
+                        "ui_patch": {"todayPlan": "Menu loaded. Select items to add to cart."}
+                    }
+                }
+            elif action.type == "add_to_cart":
+                from tools.swiggy_mcp import client, _pick_address_id
+                token = request.swiggy_token.get("access_token") if request.swiggy_token else None
+                item_raw = action.payload.get("raw", {})
+                restaurant_id = action.payload.get("restaurantId")
+                price = int(action.payload.get("estimatedPrice", 0))
+                budget_remaining = int(request.budget_data.get("remaining", 0)) if request.budget_data else 0
+                
+                if price > budget_remaining:
+                    raise ValueError(f"Cannot add item. Price (Rs {price}) exceeds your remaining budget (Rs {budget_remaining}).")
+
+                address_id = action.payload.get("addressId")
+                if not address_id:
+                    addresses = await client.call_tool(token, "food", "get_addresses", {})
+                    address_id = _pick_address_id(addresses, None)
+                
+                item_to_add = {"itemId": action.payload.get("recommendationId"), "quantity": 1}
+                if "variantsV2" in item_raw:
+                    item_to_add["variantsV2"] = item_raw["variantsV2"]
+                elif "variants" in item_raw:
+                    item_to_add["variants"] = item_raw["variants"]
+                elif "variations" in item_raw:
+                    item_to_add["variations"] = item_raw["variations"]
+                
+                await client.call_tool(token, "food", "update_food_cart", {
+                    "restaurantId": restaurant_id,
+                    "cartItems": [item_to_add],
+                    "addressId": address_id
+                })
+                cart = await client.call_tool(token, "food", "get_food_cart", {"addressId": address_id})
+                cart_total = cart.get("data", {}).get("cart", {}).get("cartTotal", price)
+                return {
+                    "status": "completed",
+                    "data": {"cart": cart.get("data", cart)},
+                    "message": f"Added {item_raw.get('name', 'item')} to cart. Cart total is Rs {cart_total}."
+                }
+            elif action.type == "view_cart":
+                from tools.swiggy_mcp import client, _pick_address_id
+                token = request.swiggy_token.get("access_token") if request.swiggy_token else None
+                address_id = action.payload.get("addressId")
+                if not address_id:
+                    addresses = await client.call_tool(token, "food", "get_addresses", {})
+                    address_id = _pick_address_id(addresses, None)
+                cart = await client.call_tool(token, "food", "get_food_cart", {"addressId": address_id})
+                return {
+                    "status": "completed",
+                    "data": {"cart": cart.get("data", cart)}
+                }
+            elif action.type == "track":
+                from tools.swiggy_mcp import client, _pick_address_id
+                token = request.swiggy_token.get("access_token") if request.swiggy_token else None
+                address_id = action.payload.get("addressId")
+                if not address_id:
+                    addresses = await client.call_tool(token, "food", "get_addresses", {})
+                    address_id = _pick_address_id(addresses, None)
+                orders_res = await client.call_tool(token, "food", "get_food_orders", {"addressId": address_id})
+                if not orders_res or "error" in orders_res:
+                    return {"status": "completed", "data": {"orders": []}, "message": "No active orders found or track failed."}
+                
+                orders_data = orders_res.get("data", {}).get("orders") or orders_res.get("orders") or []
+                if not isinstance(orders_data, list):
+                    orders_data = []
+                return {
+                    "status": "completed",
+                    "data": {"orders": orders_data}
+                }
+            elif action.type == "order_food":
+                from tools.swiggy_mcp import client, _pick_address_id
+                token = request.swiggy_token.get("access_token") if request.swiggy_token else None
+                address_id = action.payload.get("addressId")
+                if not address_id:
+                    addresses = await client.call_tool(token, "food", "get_addresses", {})
+                    address_id = _pick_address_id(addresses, None)
+                    action.payload["addressId"] = address_id
+                result = await place_food_order(action.payload, access_token=token)
                 record_action = {
                     "type": action.type,
                     "payload": action.payload,
@@ -134,7 +250,6 @@ class NourishAgentOrchestrator:
                 items = action.payload.get("items")
                 if not items and action.payload.get("raw"):
                     raw = action.payload.get("raw", {})
-                    # Handle Instamart product variations
                     variations = raw.get("variations", [])
                     if variations:
                         items = [{"spinId": variations[0].get("spinId"), "quantity": 1}]
@@ -202,6 +317,13 @@ class NourishAgentOrchestrator:
 
         if isinstance(data, dict):
             items = data.get("restaurants") or data.get("cards") or data.get("items") or data.get("products") or data.get("addresses") or []
+            
+            # Extract items from categories (common in get_restaurant_menu response)
+            categories = data.get("categories") or data.get("data", {}).get("categories")
+            if not items and categories and isinstance(categories, list):
+                for cat in categories:
+                    if isinstance(cat, dict) and "items" in cat and isinstance(cat["items"], list):
+                        items.extend(cat["items"])
         else:
             items = data if isinstance(data, list) else []
             
@@ -235,6 +357,8 @@ class NourishAgentOrchestrator:
             description = str(info.get("description") or info.get("cuisines") or "Available nearby")
             
             price = _money(info.get("price") or info.get("costForTwo") or info.get("avgCost"))
+            image_id = info.get("imageId") or info.get("cloudinaryImageId")
+            image_url = f"https://media-assets.swiggy.com/swiggy/image/upload/{image_id}" if image_id else None
             
             normalized.append(
                 Recommendation(
@@ -248,6 +372,7 @@ class NourishAgentOrchestrator:
                     tags=["open", "nearby", "Swiggy MCP"],
                     category=category,  # type: ignore[arg-type]
                     source="swiggy",
+                    image_url=image_url,
                     raw=item,
                 )
             )
@@ -294,28 +419,31 @@ class NourishAgentOrchestrator:
                     payload={"intent": "refresh_live_results"},
                 )
             ]
-        top = recommendations[0]
-        return [
+        actions = [
             DashboardAction(
-                id=f"order-{top.id}",
-                label=f"Order {top.title[:25]}",
-                type="order_food" if top.category == "restaurant" else "order_groceries",
+                id=f"view-{item.id}",
+                label=f"View Menu" if item.category == "restaurant" else f"Order {item.title[:15]}",
+                type="view_menu" if item.category == "restaurant" else "order_groceries",
                 status=status,
                 payload={
-                    "recommendationId": top.id, 
-                    "raw": top.raw, 
-                    "estimatedPrice": top.price,
+                    "recommendationId": item.id, 
+                    "raw": item.raw, 
+                    "estimatedPrice": item.price,
                     "addressId": address_id
                 },
-            ),
+            )
+            for item in recommendations
+        ]
+        actions.append(
             DashboardAction(
                 id="modify-plan",
                 label="Modify",
                 type="modify",
                 status="suggested",
                 payload={"intent": "ask_for_alternatives"},
-            ),
-        ]
+            )
+        )
+        return actions
 
     def _reasoning(
         self,

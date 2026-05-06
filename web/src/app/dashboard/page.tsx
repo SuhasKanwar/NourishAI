@@ -8,25 +8,20 @@ import {
   Check,
   ChefHat,
   CloudSun,
-  Compass,
-  IndianRupee,
   Loader2,
   MapPin,
-  PlugZap,
   ReceiptText,
   RefreshCw,
   Send,
   ShoppingBasket,
   Sparkles,
   Store,
-  Utensils,
   WalletCards,
   X,
   Bell,
   ArrowRight,
   Pizza,
-  UtensilsCrossed,
-  LayoutDashboard,
+  UtensilsCrossed
 } from "lucide-react";
 import axios from "axios";
 import Image from "next/image";
@@ -41,14 +36,16 @@ type Recommendation = {
   rating?: number;
   eta_minutes?: number;
   tags: string[];
-  category: "meal" | "restaurant" | "dineout" | "grocery";
+  category: "meal" | "restaurant" | "dineout" | "grocery" | "menu_item";
   source: "swiggy";
+  image_url?: string;
+  raw?: any;
 };
 
 type DashboardAction = {
   id: string;
   label: string;
-  type: "order_food" | "order_groceries" | "book_table" | "schedule" | "modify";
+  type: "order_food" | "order_groceries" | "book_table" | "schedule" | "modify" | "view_menu" | "add_to_cart" | "view_cart" | "checkout" | "track";
   status: "suggested" | "requires_auth" | "ready" | "scheduled" | "completed";
   payload: Record<string, unknown>;
 };
@@ -82,6 +79,9 @@ type AgentResponse = {
     totalSpent?: number;
     copilotState?: string;
   };
+  menu?: Recommendation[];
+  cart?: any;
+  orders?: any[];
 };
 
 type ChatMessage = {
@@ -134,9 +134,13 @@ export default function DashboardPage() {
   const [budgetDialogOpen, setBudgetDialogOpen] = useState(true);
   const [budgetEditing, setBudgetEditing] = useState(false);
   const [budgetSaving, setBudgetSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"food" | "dineout" | "instamart">("food");
+  const [activeTab, setActiveTab] = useState<"food" | "dineout" | "instamart" | "track">("food");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const autoRequestSent = useRef(false);
+
+  // Modals
+  const [menuModalOpen, setMenuModalOpen] = useState(false);
+  const [cartModalOpen, setCartModalOpen] = useState(false);
 
   const addToast = (message: string, type: "success" | "error" | "info" = "info") => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -375,7 +379,7 @@ export default function DashboardPage() {
       const response = await axios.post("/api/agent/action", {
         action,
       });
-      const result = response.data as { authorization_url?: string; message?: string; status?: string; intent?: string };
+      const result = response.data as { authorization_url?: string; message?: string; status?: string; intent?: string; data?: any };
 
       if (result.intent === "oauth" || action.payload.intent === "oauth") {
         const authResponse = await axios.get("/api/mcp/auth/start");
@@ -391,14 +395,26 @@ export default function DashboardPage() {
       }
       if (result.message) {
         setMessages((current) => [...current, { role: "assistant", content: result.message ?? "" }]);
-        return;
       }
-      setData((current) => ({
-        ...current,
-        actions: current.actions.map((item) =>
-          item.id === action.id ? { ...item, status: "completed" } : item,
-        ),
-      }));
+      if (result.data) {
+        setData((current) => ({
+          ...current,
+          ...result.data,
+          actions: result.data.actions || current.actions.map((item: any) =>
+            item.id === action.id ? { ...item, status: "completed" } : item,
+          ),
+        }));
+        if (result.data.menu) setMenuModalOpen(true);
+        if (result.data.cart) setCartModalOpen(true);
+        if (result.data.orders) setActiveTab("track");
+      } else {
+        setData((current) => ({
+          ...current,
+          actions: current.actions.map((item) =>
+            item.id === action.id ? { ...item, status: "completed" } : item,
+          ),
+        }));
+      }
       addToast(`${action.label} completed.`, "success");
     } catch (err: any) {
       addToast(err.response?.data?.message || `${action.label} failed.`, "error");
@@ -431,6 +447,62 @@ export default function DashboardPage() {
           ))}
         </AnimatePresence>
       </div>
+
+      {/* Menu Modal */}
+      <AnimatePresence>
+        {menuModalOpen && data.menu && (
+          <div className="fixed inset-0 z-[105] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full max-w-4xl max-h-full flex flex-col bg-[#101312] border border-white/10 shadow-2xl overflow-hidden">
+              <div className="flex justify-between items-center p-6 border-b border-white/10">
+                <h2 className="text-xl font-bold">Restaurant Menu</h2>
+                <button onClick={() => setMenuModalOpen(false)} className="text-white/40 hover:text-white"><X /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6 scrollbar-hide grid gap-6 sm:grid-cols-2">
+                {data.menu.map(item => {
+                  const action = data.actions.find(a => a.payload?.recommendationId === item.id);
+                  return <RecommendationCard key={item.id} item={item} onAction={() => action ? runAction(action) : addToast("No action available", "info")} />
+                })}
+              </div>
+              <div className="p-6 border-t border-white/10 flex justify-end">
+                <button onClick={() => runAction({ id: "view_cart", label: "View Cart", type: "view_cart", status: "ready", payload: { restaurantId: data.menu?.[0]?.raw?.restaurantId } })} className="bg-[#f75000] text-black px-6 py-3 font-bold flex items-center gap-2 hover:bg-[#ff7a3d]">
+                  <ShoppingBasket className="h-4 w-4" /> View Cart & Checkout
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cart Modal */}
+      <AnimatePresence>
+        {cartModalOpen && data.cart && (
+          <div className="fixed inset-0 z-[105] flex items-center justify-center bg-black/80 backdrop-blur-sm p-6">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full max-w-md max-h-full flex flex-col bg-[#101312] border border-white/10 shadow-2xl overflow-hidden">
+              <div className="flex justify-between items-center p-6 border-b border-white/10">
+                <h2 className="text-xl font-bold">Your Cart</h2>
+                <button onClick={() => setCartModalOpen(false)} className="text-white/40 hover:text-white"><X /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+                <p className="text-sm text-white/50 mb-4">Cart Total: <strong className="text-white">Rs {data.cart.cart?.cartTotal || data.cart.cartTotal || 0}</strong></p>
+                {data.cart.cart?.cartItems?.map((item: any, i: number) => (
+                  <div key={i} className="mb-4 border border-white/5 bg-black/20 p-4">
+                    <p className="font-bold text-sm">{item.name || "Item"}</p>
+                    <p className="text-xs text-white/40 mt-1">Qty: {item.quantity} • Rs {item.subTotal || item.price}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="p-6 border-t border-white/10">
+                <button onClick={() => {
+                  setCartModalOpen(false);
+                  runAction({ id: "checkout", label: "Checkout", type: "order_food", status: "ready", payload: { estimatedPrice: data.cart.cart?.cartTotal } });
+                }} className="w-full bg-[#f75000] text-black px-6 py-3 font-bold flex items-center justify-center gap-2 hover:bg-[#ff7a3d]">
+                  <Check className="h-4 w-4" /> Place Order
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {budgetDialogOpen && (
         <div className="fixed inset-0 z-[110] grid place-items-center bg-black/85 backdrop-blur-sm px-4">
@@ -596,6 +668,16 @@ export default function DashboardPage() {
               label="Instamart"
               count={data.groceries.length}
             />
+            <TabButton
+              active={activeTab === "track"}
+              onClick={() => {
+                setActiveTab("track");
+                runAction({ id: "track_orders", label: "Track Orders", type: "track", status: "ready", payload: {} } as any);
+              }}
+              icon={<ReceiptText />}
+              label="Track"
+              count={data.orders?.length || 0}
+            />
           </div>
         </header>
 
@@ -660,6 +742,29 @@ export default function DashboardPage() {
                   <div className="col-span-full py-20 text-center border border-dashed border-white/10">
                     <ShoppingBasket className="mx-auto h-12 w-12 text-white/10 mb-4" />
                     <p className="text-sm text-white/30">Instamart has no matching products.</p>
+                  </div>
+                )
+              )}
+              {activeTab === "track" && (
+                data.orders && data.orders.length > 0 ? (
+                  data.orders.map((order) => (
+                    <div key={order.orderId} className="col-span-full mb-4 border border-white/10 bg-white/[0.02] p-5">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h3 className="font-bold text-lg">{order.restaurantName || "Swiggy Order"}</h3>
+                          <p className="text-xs text-white/50 mt-1">Order #{order.orderId}</p>
+                        </div>
+                        <span className="bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider">{order.orderStatus}</span>
+                      </div>
+                      <div className="mt-4 pt-4 border-t border-white/10">
+                        <p className="text-sm text-white/80">{order.statusMessage || "Order is in progress"}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="col-span-full py-20 text-center border border-dashed border-white/10">
+                    <MapPin className="mx-auto h-12 w-12 text-white/10 mb-4" />
+                    <p className="text-sm text-white/30">No active orders found.</p>
                   </div>
                 )
               )}
@@ -749,6 +854,11 @@ function RecommendationCard({ item, onAction }: { item: Recommendation, onAction
   return (
     <article className="group flex flex-col border border-white/10 bg-white/[0.02] p-5 transition hover:border-[#f75000]/50 hover:bg-white/[0.04]">
       <div className="flex items-start justify-between gap-4">
+        {item.image_url && (
+          <div className="mb-4 h-32 w-full shrink-0 overflow-hidden rounded-xl bg-black/40">
+            <img src={item.image_url} alt={item.title} className="h-full w-full object-cover opacity-80 transition hover:opacity-100" />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-bold">{item.title}</h3>
           <p className="mt-1 truncate text-xs text-white/40 font-medium uppercase tracking-wider">{item.vendor}</p>
@@ -766,8 +876,8 @@ function RecommendationCard({ item, onAction }: { item: Recommendation, onAction
           <Sparkles className="h-3 w-3 text-[#f75000]" />
           <span className="text-[10px] font-bold text-white/40 uppercase tracking-tighter">Healthy Pick</span>
         </div>
-        <button onClick={onAction} className="flex items-center gap-2 bg-white px-3 py-1.5 text-[10px] font-bold text-black transition group-hover:bg-[#f75000] group-hover:text-white">
-          SELECT
+        <button onClick={onAction} className="flex items-center gap-2 bg-white px-3 py-1.5 text-[10px] font-bold text-black transition group-hover:bg-[#f75000] group-hover:text-white uppercase">
+          {item.category === "restaurant" ? "View Menu" : item.category === "menu_item" ? "Add" : "Select"}
         </button>
       </div>
     </article>
