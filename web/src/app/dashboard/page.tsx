@@ -29,6 +29,7 @@ import {
   LayoutDashboard,
 } from "lucide-react";
 import axios from "axios";
+import Image from "next/image";
 
 type Recommendation = {
   id: string;
@@ -174,7 +175,27 @@ export default function DashboardPage() {
           label: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
         });
       },
-      () => setLocation({ status: "denied", label: "Location permission denied" }),
+      async (error) => {
+        try {
+          const res = await axios.get("https://ipapi.co/json/");
+          if (res.data && res.data.latitude && res.data.longitude) {
+            setLocation({
+              status: "ready",
+              latitude: res.data.latitude,
+              longitude: res.data.longitude,
+              label: `${res.data.city}, ${res.data.country_name}`,
+            });
+            return;
+          }
+        } catch (e) {
+          console.error("IP fallback failed:", e);
+        }
+        let label = "Location error";
+        if (error.code === 1) label = "Location permission denied";
+        else if (error.code === 2) label = "Position unavailable";
+        else if (error.code === 3) label = "Location request timed out";
+        setLocation({ status: "denied", label });
+      },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 300000 },
     );
   }, []);
@@ -355,7 +376,7 @@ export default function DashboardPage() {
         action,
       });
       const result = response.data as { authorization_url?: string; message?: string; status?: string; intent?: string };
-      
+
       if (result.intent === "oauth" || action.payload.intent === "oauth") {
         const authResponse = await axios.get("/api/mcp/auth/start");
         if (authResponse.data.authorization_url) {
@@ -397,10 +418,9 @@ export default function DashboardPage() {
               initial={{ opacity: 0, x: 20, scale: 0.9 }}
               animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, x: 20, scale: 0.9 }}
-              className={`flex items-center gap-3 border border-white/10 px-4 py-3 shadow-2xl ${
-                toast.type === "success" ? "bg-[#0a2e1f] text-[#4ade80]" : 
+              className={`flex items-center gap-3 border border-white/10 px-4 py-3 shadow-2xl ${toast.type === "success" ? "bg-[#0a2e1f] text-[#4ade80]" :
                 toast.type === "error" ? "bg-[#2e0a0a] text-[#f87171]" : "bg-[#101312] text-white"
-              }`}
+                }`}
             >
               {toast.type === "success" ? <Check className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
               <span className="text-sm font-medium">{toast.message}</span>
@@ -457,7 +477,7 @@ export default function DashboardPage() {
       <aside className="flex w-80 flex-col border-r border-white/10 bg-[#0a0c0b]">
         <div className="flex items-center gap-3 border-b border-white/10 p-6">
           <div className="grid h-10 w-10 place-items-center bg-[#f75000] text-black">
-            <Sparkles className="h-6 w-6" />
+            <Image src="/short-logo.png" alt="Logo" width={500} height={500} />
           </div>
           <div>
             <h1 className="text-lg font-bold">NourishAI</h1>
@@ -492,14 +512,14 @@ export default function DashboardPage() {
                 <span className="text-xs text-white/40">of Rs {limit}</span>
               </div>
               <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                <motion.div 
+                <motion.div
                   initial={{ width: 0 }}
                   animate={{ width: `${usage}%` }}
                   className="h-full bg-[#f75000]"
                 />
               </div>
               <p className="mt-2 text-[10px] text-white/30 font-medium">You have used {usage.toFixed(1)}% of your limit.</p>
-              
+
               <AnimatePresence>
                 {budgetEditing && (
                   <motion.form
@@ -555,26 +575,26 @@ export default function DashboardPage() {
         {/* Navigation Tabs */}
         <header className="flex h-16 items-center border-b border-white/10 px-8">
           <div className="flex h-full gap-8">
-            <TabButton 
-              active={activeTab === "food"} 
-              onClick={() => setActiveTab("food")} 
-              icon={<Pizza />} 
-              label="Food" 
-              count={data.restaurants.length} 
+            <TabButton
+              active={activeTab === "food"}
+              onClick={() => setActiveTab("food")}
+              icon={<Pizza />}
+              label="Food"
+              count={data.restaurants.length}
             />
-            <TabButton 
-              active={activeTab === "dineout"} 
-              onClick={() => setActiveTab("dineout")} 
-              icon={<UtensilsCrossed />} 
-              label="Dineout" 
-              count={data.dineouts.length} 
+            <TabButton
+              active={activeTab === "dineout"}
+              onClick={() => setActiveTab("dineout")}
+              icon={<UtensilsCrossed />}
+              label="Dineout"
+              count={data.dineouts.length}
             />
-            <TabButton 
-              active={activeTab === "instamart"} 
-              onClick={() => setActiveTab("instamart")} 
-              icon={<ShoppingBasket />} 
-              label="Instamart" 
-              count={data.groceries.length} 
+            <TabButton
+              active={activeTab === "instamart"}
+              onClick={() => setActiveTab("instamart")}
+              icon={<ShoppingBasket />}
+              label="Instamart"
+              count={data.groceries.length}
             />
           </div>
         </header>
@@ -594,10 +614,10 @@ export default function DashboardPage() {
                   data.restaurants.map((item) => {
                     const action = data.actions.find(a => a.payload?.recommendationId === item.id);
                     return (
-                      <RecommendationCard 
-                        key={item.id} 
-                        item={item} 
-                        onAction={() => action ? runAction(action) : addToast("No action available for this item", "info")} 
+                      <RecommendationCard
+                        key={item.id}
+                        item={item}
+                        onAction={() => action ? runAction(action) : addToast("No action available for this item", "info")}
                       />
                     );
                   })
@@ -611,10 +631,10 @@ export default function DashboardPage() {
               {activeTab === "dineout" && (
                 data.dineouts.length > 0 ? (
                   data.dineouts.map((item) => (
-                    <RecommendationCard 
-                      key={item.id} 
-                      item={item} 
-                      onAction={() => addToast("Dineout booking coming soon", "info")} 
+                    <RecommendationCard
+                      key={item.id}
+                      item={item}
+                      onAction={() => addToast("Dineout booking coming soon", "info")}
                     />
                   ))
                 ) : (
@@ -629,10 +649,10 @@ export default function DashboardPage() {
                   data.groceries.map((item) => {
                     const action = data.actions.find(a => a.payload?.recommendationId === item.id);
                     return (
-                      <RecommendationCard 
-                        key={item.id} 
-                        item={item} 
-                        onAction={() => action ? runAction(action) : addToast("No action available for this item", "info")} 
+                      <RecommendationCard
+                        key={item.id}
+                        item={item}
+                        onAction={() => action ? runAction(action) : addToast("No action available for this item", "info")}
                       />
                     );
                   })
@@ -671,9 +691,8 @@ export default function DashboardPage() {
           ) : (
             messages.map((message, i) => (
               <div key={i} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
-                <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  message.role === "user" ? "bg-[#f75000] text-black font-medium" : "bg-white/5 text-white/80 border border-white/10"
-                }`}>
+                <div className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${message.role === "user" ? "bg-[#f75000] text-black font-medium" : "bg-white/5 text-white/80 border border-white/10"
+                  }`}>
                   {message.content}
                 </div>
               </div>
@@ -713,11 +732,10 @@ export default function DashboardPage() {
 
 function TabButton({ active, onClick, icon, label, count }: { active: boolean, onClick: () => void, icon: any, label: string, count: number }) {
   return (
-    <button 
+    <button
       onClick={onClick}
-      className={`relative flex items-center gap-2 h-full text-sm font-bold transition-all ${
-        active ? "text-white" : "text-white/40 hover:text-white/60"
-      }`}
+      className={`relative flex items-center gap-2 h-full text-sm font-bold transition-all ${active ? "text-white" : "text-white/40 hover:text-white/60"
+        }`}
     >
       {icon}
       <span>{label}</span>
@@ -740,9 +758,9 @@ function RecommendationCard({ item, onAction }: { item: Recommendation, onAction
           <p className="text-[10px] text-white/30 font-bold">{item.eta_minutes || "--"} MIN</p>
         </div>
       </div>
-      
+
       <p className="mt-4 line-clamp-2 flex-1 text-xs leading-5 text-white/50">{item.description}</p>
-      
+
       <div className="mt-5 flex items-center justify-between gap-2 border-t border-white/5 pt-4">
         <div className="flex items-center gap-1">
           <Sparkles className="h-3 w-3 text-[#f75000]" />
