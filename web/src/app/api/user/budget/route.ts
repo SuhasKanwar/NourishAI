@@ -35,12 +35,12 @@ export async function GET() {
  * Sets the monthly budget for the logged-in user.
  * Body: { monthly_budget: number }
  */
-export async function PUT(request: NextRequest) {
+export async function POST(request: NextRequest) {
   const userId = await requireUserId();
   if (userId instanceof NextResponse) return userId;
 
   const body = await request.json();
-  const monthlyBudget = Number(body.monthly_budget);
+  const monthlyBudget = Number(body.monthly_limit || body.monthly_budget);
   if (!Number.isFinite(monthlyBudget) || monthlyBudget <= 0) {
     return NextResponse.json(
       { error: "monthly_budget must be a positive number" },
