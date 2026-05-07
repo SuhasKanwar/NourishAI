@@ -22,11 +22,20 @@ export function MenuModal({ isOpen, onClose, menu, actions, runAction, addToast 
               <h2 className="text-xl font-bold">Restaurant Menu</h2>
               <button onClick={onClose} className="text-white/40 hover:text-white"><X /></button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 scrollbar-hide grid gap-6 sm:grid-cols-2">
-              {menu.map(item => {
-                const action = actions.find(a => a.payload?.recommendationId === item.id);
-                return <RecommendationCard key={item.id} item={item} onAction={() => action ? runAction(action) : addToast("No action available", "info")} />
-              })}
+            <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
+              {menu.length > 0 ? (
+                <div className="grid gap-6 sm:grid-cols-2">
+                  {menu.map(item => {
+                    const action = actions.find(a => a.payload?.recommendationId === item.id);
+                    return <RecommendationCard key={item.id} item={item} onAction={() => action ? runAction(action) : addToast("No action available", "info")} />
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <ShoppingBasket className="h-12 w-12 text-white/10 mb-4" />
+                  <p className="text-sm text-white/30">No menu items found for this restaurant.</p>
+                </div>
+              )}
             </div>
             <div className="p-6 border-t border-white/10 flex justify-end">
               <button 

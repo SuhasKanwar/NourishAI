@@ -68,17 +68,24 @@ export default function Dashboard() {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         async (position) => {
+          const { latitude, longitude } = position.coords;
           try {
-            const { latitude, longitude } = position.coords;
             const res = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+            const label = res.data.display_name.split(",")[0] + ", " + (res.data.address.city || res.data.address.town || res.data.address.village || "");
             setLocation({
-              label: res.data.display_name.split(",")[0] + ", " + res.data.address.city,
+              label,
               latitude,
               longitude,
               status: "ready",
             });
           } catch {
-            setLocation({ status: "denied" });
+            // Fallback to coordinates if reverse geocoding fails
+            setLocation({
+              label: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+              latitude,
+              longitude,
+              status: "ready",
+            });
           }
         },
         () => setLocation({ status: "denied" }),

@@ -73,33 +73,77 @@ class SwiggyMCPClient:
 
     def _parse_tool_response(self, data: Any) -> Any:
         if isinstance(data, dict):
+            # If it's already a structured response with success/error, return it
+            if "success" in data or "error" in data:
+                return data
+            
             content = data.get("structuredContent") or data.get("data") or data.get("content") or data.get("result")
             if content:
                 return self._parse_tool_response(content)
         
-        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and data[0].get("type") == "text":
-            try:
+        if isinstance(data, list) and len(data) > 0:
+            if isinstance(data[0], dict) and data[0].get("type") == "text":
                 text = data[0].get("text", "")
-                if text.strip().startswith(("{", "[")):
-                    parsed = json.loads(text)
-                    return self._parse_tool_response(parsed)
-            except Exception:
-                pass
-        return data
+                try:
+                    if text.strip().startswith(("{", "[")):
+                        parsed = json.loads(text)
+                        return self._parse_tool_response(parsed)
+                except Exception:
+                    pass
+                # If it's not JSON but text, return it as a message
+                return {"success": False, "message": text}
+        
+        # Fallback
+        return data if isinstance(data, dict) else {"success": True, "data": data}
+
+    async def ensure_address_id(self, access_token: str | None, server: McpServer, address_id: str | None) -> str:
+        if address_id:
+            return address_id
+        
+        tool_name = "get_addresses" if server != "dineout" else "get_saved_locations"
+        addresses = await self.call_tool(access_token, server, tool_name, {})
+        return _pick_address_id(addresses)
 
 
 client = SwiggyMCPClient()
 
+def _pick_address_id(addresses: Any) -> str:
+    items = []
+    if isinstance(addresses, dict):
+        items = (
+            addresses.get("addresses") or 
+            addresses.get("locations") or 
+            addresses.get("items") or 
+            addresses.get("data", {}).get("addresses") or 
+            addresses.get("data", {}).get("locations") or 
+            []
+        )
+    elif isinstance(addresses, list):
+        items = addresses
+    
+    if not items or not isinstance(items, list):
+        return "" # Return empty so ensure_address_id can fail or caller can handle
+    
+    # Simple heuristic: first address
+    try:
+        first = items[0]
+        if isinstance(first, dict):
+            return str(first.get("id") or first.get("addressId") or "")
+    except Exception:
+        pass
+    return ""
+
+# --- Food Tools ---
+
+async def get_addresses(access_token: str | None = None) -> dict[str, Any]:
+    return await client.call_tool(access_token, "food", "get_addresses", {})
 
 async def search_restaurants(
     query: str,
-    location: str | None = None,
     access_token: str | None = None,
     address_id: str | None = None,
 ) -> dict[str, Any]:
-    if not address_id:
-        addresses = await client.call_tool(access_token, "food", "get_addresses", {})
-        address_id = _pick_address_id(addresses, location)
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
     return await client.call_tool(
         access_token,
         "food",
@@ -107,15 +151,15 @@ async def search_restaurants(
         {"addressId": address_id, "query": query},
     )
 
-
 async def search_menu(
     query: str,
-    address_id: str,
+    address_id: str | None = None,
     restaurant_id: str | None = None,
     veg_filter: int | None = None,
     offset: int | None = None,
     access_token: str | None = None,
 ) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
     args: dict[str, Any] = {"query": query, "addressId": address_id}
     if restaurant_id:
         args["restaurantIdOfAddedItem"] = restaurant_id
@@ -125,67 +169,79 @@ async def search_menu(
         args["offset"] = offset
     return await client.call_tool(access_token, "food", "search_menu", args)
 
-
-async def get_menu(
+async def get_restaurant_menu(
     restaurant_id: str,
     access_token: str | None = None,
     address_id: str | None = None,
 ) -> dict[str, Any]:
-    args: dict[str, Any] = {"restaurantId": restaurant_id}
-    if address_id:
-        args["addressId"] = address_id
-    return await client.call_tool(access_token, "food", "get_restaurant_menu", args)
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
+    return await client.call_tool(access_token, "food", "get_restaurant_menu", {"restaurantId": restaurant_id, "addressId": address_id})
 
+async def get_food_cart(address_id: str | None = None, restaurant_name: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
+    args: dict[str, Any] = {"addressId": address_id}
+    if restaurant_name:
+        args["restaurantName"] = restaurant_name
+    return await client.call_tool(access_token, "food", "get_food_cart", args)
 
-async def place_food_order(data: dict[str, Any], access_token: str | None = None) -> dict[str, Any]:
-    return await client.call_tool(access_token, "food", "place_food_order", data)
+async def update_food_cart(
+    restaurant_id: str,
+    cart_items: list[dict[str, Any]],
+    address_id: str | None = None,
+    restaurant_name: str | None = None,
+    access_token: str | None = None,
+) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
+    args: dict[str, Any] = {
+        "restaurantId": restaurant_id,
+        "cartItems": cart_items,
+        "addressId": address_id
+    }
+    if restaurant_name:
+        args["restaurantName"] = restaurant_name
+    return await client.call_tool(access_token, "food", "update_food_cart", args)
 
+async def flush_food_cart(access_token: str | None = None) -> dict[str, Any]:
+    return await client.call_tool(access_token, "food", "flush_food_cart", {})
 
-async def order_groceries(items: list[dict[str, Any]], access_token: str | None = None) -> dict[str, Any]:
-    addresses = await client.call_tool(access_token, "im", "get_addresses", {})
-    address_id = _pick_address_id(addresses, None)
-    products = []
-    for item in items:
-        found = await client.call_tool(
-            access_token,
-            "im",
-            "search_products",
-            {"addressId": address_id, "query": item.get("name", "")},
-        )
-        products.append(found)
-    cart = await client.call_tool(
-        access_token,
-        "im",
-        "update_cart",
-        {"addressId": address_id, "items": items},
-    )
-    checkout = await client.call_tool(access_token, "im", "checkout", {"addressId": address_id})
-    return {"products": products, "cart": cart, "checkout": checkout}
+async def apply_food_coupon(coupon_code: str, address_id: str | None = None, cart_id: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
+    args: dict[str, Any] = {"couponCode": coupon_code, "addressId": address_id}
+    if cart_id:
+        args["cartId"] = cart_id
+    return await client.call_tool(access_token, "food", "apply_food_coupon", args)
 
+async def fetch_food_coupons(restaurant_id: str, address_id: str | None = None, coupon_code: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
+    args: dict[str, Any] = {"restaurantId": restaurant_id, "addressId": address_id}
+    if coupon_code:
+        args["couponCode"] = coupon_code
+    return await client.call_tool(access_token, "food", "fetch_food_coupons", args)
 
-async def book_table(details: dict[str, Any], access_token: str | None = None) -> dict[str, Any]:
-    if "restaurantId" not in details:
-        locations = await client.call_tool(access_token, "dineout", "get_saved_locations", {})
-        details["location"] = details.get("location") or locations
-        search = await client.call_tool(
-            access_token,
-            "dineout",
-            "search_restaurants_dineout",
-            details.get("search", {}),
-        )
-        details["searchResult"] = search
-        return search
-    return await client.call_tool(access_token, "dineout", "book_table", details)
+async def place_food_order(address_id: str | None = None, payment_method: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
+    args: dict[str, Any] = {"addressId": address_id}
+    if payment_method:
+        args["paymentMethod"] = payment_method
+    return await client.call_tool(access_token, "food", "place_food_order", args)
 
+async def get_food_orders(address_id: str | None = None, order_count: int | None = None, access_token: str | None = None) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "food", address_id)
+    args: dict[str, Any] = {"addressId": address_id}
+    if order_count:
+        args["orderCount"] = order_count
+    return await client.call_tool(access_token, "food", "get_food_orders", args)
 
-async def search_dineout(details: dict[str, Any], access_token: str | None = None) -> dict[str, Any]:
-    return await client.call_tool(access_token, "dineout", "search_restaurants_dineout", details)
+async def get_food_order_details(order_id: str, access_token: str | None = None) -> dict[str, Any]:
+    return await client.call_tool(access_token, "food", "get_food_order_details", {"orderId": order_id})
 
+async def track_food_order(order_id: str, access_token: str | None = None) -> dict[str, Any]:
+    return await client.call_tool(access_token, "food", "track_food_order", {"orderId": order_id})
+
+# --- Instamart Tools ---
 
 async def search_groceries(query: str, access_token: str | None = None, address_id: str | None = None) -> dict[str, Any]:
-    if not address_id:
-        addresses = await client.call_tool(access_token, "im", "get_addresses", {})
-        address_id = _pick_address_id(addresses, None)
+    address_id = await client.ensure_address_id(access_token, "im", address_id)
     return await client.call_tool(
         access_token,
         "im",
@@ -193,113 +249,75 @@ async def search_groceries(query: str, access_token: str | None = None, address_
         {"addressId": address_id, "query": query},
     )
 
+async def order_groceries(items: list[dict[str, Any]], access_token: str | None = None, address_id: str | None = None) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "im", address_id)
+    cart = await client.call_tool(
+        access_token,
+        "im",
+        "update_cart",
+        {"addressId": address_id, "items": items},
+    )
+    checkout = await client.call_tool(access_token, "im", "checkout", {"addressId": address_id})
+    return {"cart": cart, "checkout": checkout}
 
-def _pick_address_id(addresses: Any, location: str | None) -> str:
-    items = []
-    if isinstance(addresses, dict):
-        items = addresses.get("addresses") or addresses.get("items") or addresses.get("data") or []
-    elif isinstance(addresses, list):
-        items = addresses
-    
-    if not items or not isinstance(items, list):
-        return "default"
-    
-    # Simple heuristic: first address
-    first = items[0]
-    if isinstance(first, dict):
-        return str(first.get("id") or first.get("addressId") or "default")
-    return "default"
+# --- Dineout Tools ---
 
+async def search_dineout(query: str, location: str | None = None, latitude: float | None = None, longitude: float | None = None, access_token: str | None = None) -> dict[str, Any]:
+    address_id = await client.ensure_address_id(access_token, "dineout", None)
+    args: dict[str, Any] = {"query": query}
+    if address_id: args["addressId"] = address_id
+    if location: args["location"] = location
+    if latitude: args["latitude"] = latitude
+    if longitude: args["longitude"] = longitude
+    return await client.call_tool(access_token, "dineout", "search_restaurants_dineout", args)
+
+async def book_table(restaurant_id: str, date: str, time_slot: str, guests: int, access_token: str | None = None) -> dict[str, Any]:
+    args = {
+        "restaurantId": restaurant_id,
+        "date": date,
+        "timeSlot": time_slot,
+        "guests": guests
+    }
+    return await client.call_tool(access_token, "dineout", "book_table", args)
+
+# --- LangChain Tools (Wrappers) ---
 
 @tool
-async def search_restaurants_tool(query: str, location: str, access_token: str | None = None) -> dict[str, Any]:
+async def search_restaurants_tool(query: str, access_token: str | None = None, address_id: str | None = None) -> dict[str, Any]:
     """Search Swiggy Food restaurants for delivery."""
-    return await search_restaurants(query=query, location=location, access_token=access_token)
-
-
-@tool
-async def get_menu_tool(restaurant_id: str, access_token: str | None = None) -> dict[str, Any]:
-    """Fetch a Swiggy Food restaurant menu."""
-    return await get_menu(restaurant_id=restaurant_id, access_token=access_token)
-
+    return await search_restaurants(query=query, access_token=access_token, address_id=address_id)
 
 @tool
-async def place_food_order_tool(data: dict[str, Any], access_token: str | None = None) -> dict[str, Any]:
-    """Place a Swiggy Food order."""
-    return await place_food_order(data=data, access_token=access_token)
-
-
-@tool
-async def order_groceries_tool(items: list[dict[str, Any]], access_token: str | None = None) -> dict[str, Any]:
-    """Order groceries through Swiggy Instamart."""
-    return await order_groceries(items=items, access_token=access_token)
-
+async def search_menu_tool(query: str, address_id: str | None = None, restaurant_id: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Search for dishes and menu items across restaurants or within a specific restaurant."""
+    return await search_menu(query=query, address_id=address_id, restaurant_id=restaurant_id, access_token=access_token)
 
 @tool
-async def book_table_tool(details: dict[str, Any], access_token: str | None = None) -> dict[str, Any]:
-    """Book a restaurant table through Swiggy Dineout."""
-    return await book_table(details=details, access_token=access_token)
+async def get_restaurant_menu_tool(restaurant_id: str, access_token: str | None = None, address_id: str | None = None) -> dict[str, Any]:
+    """Fetch the complete menu of a Swiggy Food restaurant."""
+    return await get_restaurant_menu(restaurant_id=restaurant_id, access_token=access_token, address_id=address_id)
 
 @tool
-async def get_addresses_tool(access_token: str | None = None) -> dict[str, Any]:
-    """Get all saved delivery addresses for the authenticated Swiggy user."""
-    return await client.call_tool(access_token, "food", "get_addresses", {})
-
-@tool
-async def search_menu_tool(query: str, address_id: str, restaurant_id: str | None = None, veg_filter: int | None = None, offset: int | None = None, access_token: str | None = None) -> dict[str, Any]:
-    """Search for dishes and menu items to order for food delivery."""
-    args: dict[str, Any] = {"query": query, "addressId": address_id}
-    if restaurant_id: args["restaurantIdOfAddedItem"] = restaurant_id
-    if veg_filter is not None: args["vegFilter"] = veg_filter
-    if offset is not None: args["offset"] = offset
-    return await client.call_tool(access_token, "food", "search_menu", args)
-
-@tool
-async def apply_food_coupon_tool(coupon_code: str, address_id: str, cart_id: str | None = None, access_token: str | None = None) -> dict[str, Any]:
-    """Apply coupon code or discount to food delivery order."""
-    args: dict[str, Any] = {"couponCode": coupon_code, "addressId": address_id}
-    if cart_id: args["cartId"] = cart_id
-    return await client.call_tool(access_token, "food", "apply_food_coupon", args)
-
-@tool
-async def fetch_food_coupons_tool(restaurant_id: str, address_id: str, coupon_code: str | None = None, access_token: str | None = None) -> dict[str, Any]:
-    """Get available coupons and offers for food delivery order."""
-    args: dict[str, Any] = {"restaurantId": restaurant_id, "addressId": address_id}
-    if coupon_code: args["couponCode"] = coupon_code
-    return await client.call_tool(access_token, "food", "fetch_food_coupons", args)
-
-@tool
-async def flush_food_cart_tool(access_token: str | None = None) -> dict[str, Any]:
-    """Clear or empty the food delivery cart."""
-    return await client.call_tool(access_token, "food", "flush_food_cart", {})
-
-@tool
-async def get_food_cart_tool(address_id: str, restaurant_name: str | None = None, access_token: str | None = None) -> dict[str, Any]:
-    """Get current food delivery cart with all items."""
-    args: dict[str, Any] = {"addressId": address_id}
-    if restaurant_name: args["restaurantName"] = restaurant_name
-    return await client.call_tool(access_token, "food", "get_food_cart", args)
-
-@tool
-async def update_food_cart_tool(restaurant_id: str, cart_items: list[dict[str, Any]], address_id: str, restaurant_name: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+async def update_food_cart_tool(restaurant_id: str, cart_items: list[dict[str, Any]], address_id: str | None = None, access_token: str | None = None) -> dict[str, Any]:
     """Add items to food delivery cart or update cart contents."""
-    args: dict[str, Any] = {"restaurantId": restaurant_id, "cartItems": cart_items, "addressId": address_id}
-    if restaurant_name: args["restaurantName"] = restaurant_name
-    return await client.call_tool(access_token, "food", "update_food_cart", args)
+    return await update_food_cart(restaurant_id=restaurant_id, cart_items=cart_items, address_id=address_id, access_token=access_token)
 
 @tool
-async def get_food_order_details_tool(order_id: str, access_token: str | None = None) -> dict[str, Any]:
-    """Get detailed information about a specific food delivery order."""
-    return await client.call_tool(access_token, "food", "get_food_order_details", {"orderId": order_id})
+async def get_food_cart_tool(address_id: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Get current food delivery cart."""
+    return await get_food_cart(address_id=address_id, access_token=access_token)
 
 @tool
-async def get_food_orders_tool(address_id: str, order_count: int | None = None, access_token: str | None = None) -> dict[str, Any]:
-    """Get active food delivery orders and order status."""
-    args: dict[str, Any] = {"addressId": address_id}
-    if order_count: args["orderCount"] = order_count
-    return await client.call_tool(access_token, "food", "get_food_orders", args)
+async def place_food_order_tool(address_id: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Place the food delivery order."""
+    return await place_food_order(address_id=address_id, access_token=access_token)
 
 @tool
-async def track_food_order_tool(order_id: str, access_token: str | None = None) -> dict[str, Any]:
-    """Track food delivery order status and delivery progress."""
-    return await client.call_tool(access_token, "food", "track_food_order", {"orderId": order_id})
+async def search_groceries_tool(query: str, access_token: str | None = None, address_id: str | None = None) -> dict[str, Any]:
+    """Search for products on Swiggy Instamart."""
+    return await search_groceries(query=query, access_token=access_token, address_id=address_id)
+
+@tool
+async def search_dineout_tool(query: str, location: str | None = None, access_token: str | None = None) -> dict[str, Any]:
+    """Search for restaurants on Swiggy Dineout."""
+    return await search_dineout(query=query, location=location, access_token=access_token)
