@@ -1,4 +1,5 @@
 import { MapPin } from "lucide-react";
+import { motion } from "framer-motion";
 
 interface TrackingTabProps {
   orders?: any[];
@@ -9,7 +10,12 @@ export function TrackingTab({ orders }: TrackingTabProps) {
     <>
       {orders && orders.length > 0 ? (
         orders.map((order) => (
-          <div key={order.orderId} className="col-span-full mb-4 border border-white/10 bg-white/[0.02] p-5">
+          <motion.div 
+            key={order.orderId}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="col-span-full mb-4 border border-white/10 bg-white/[0.02] p-5 animate-pop-bright"
+          >
             <div className="flex justify-between items-start">
               <div>
                 <h3 className="font-bold text-lg">{order.restaurantName || "Swiggy Order"}</h3>
@@ -20,7 +26,7 @@ export function TrackingTab({ orders }: TrackingTabProps) {
             <div className="mt-4 pt-4 border-t border-white/10">
               <p className="text-sm text-white/80">{order.statusMessage || "Order is in progress"}</p>
             </div>
-          </div>
+          </motion.div>
         ))
       ) : (
         <div className="col-span-full py-20 text-center border border-dashed border-white/10">

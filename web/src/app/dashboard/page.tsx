@@ -312,7 +312,7 @@ export default function Dashboard() {
                 ADJUST
               </button>
             </div>
-            <div className="border border-white/10 bg-white/[0.02] p-4">
+            <div key={`${remaining}-${limit}`} className="border border-white/10 bg-white/[0.02] p-4 animate-pop-bright">
               <div className="flex items-end justify-between mb-2">
                 <span className="text-2xl font-bold">Rs {remaining}</span>
                 <span className="text-xs text-white/40">of Rs {limit}</span>
@@ -358,7 +358,7 @@ export default function Dashboard() {
                 <p className="text-xs text-white/20 italic">No actions queued.</p>
               ) : (
                 data.actions.map((action) => (
-                  <motion.div key={action.id} layout className="group relative border border-white/10 bg-white/[0.03] p-3 transition hover:border-[#f75000]/50">
+                  <motion.div key={action.id} layout className="group relative border border-white/10 bg-white/[0.03] p-3 transition hover:border-[#f75000]/50 animate-pop-bright">
                     <p className="text-xs font-bold">{action.label}</p>
                     <p className="mt-0.5 text-[10px] text-white/40 uppercase tracking-tighter">{action.status}</p>
                     <button

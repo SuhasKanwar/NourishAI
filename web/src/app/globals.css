@@ -39,3 +39,27 @@ html {
   scroll-behavior: smooth;
   scroll-padding-top: 10px;
 }
+
+@keyframes pop-bright {
+  0% {
+    transform: scale(0.95);
+    filter: brightness(1);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  20% {
+    transform: scale(1.02);
+    filter: brightness(1.8);
+    border-color: #f75000;
+    box-shadow: 0 0 20px rgba(247, 80, 0, 0.4);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0px rgba(247, 80, 0, 0);
+  }
+}
+
+.animate-pop-bright {
+  animation: pop-bright 0.6s cubic-bezier(0.2, 0, 0.2, 1) forwards;
+}

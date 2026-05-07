@@ -1,4 +1,5 @@
 import { Sparkles } from "lucide-react";
+import { motion } from "framer-motion";
 import { Recommendation } from "@/types/dashboard";
 
 interface RecommendationCardProps {
@@ -8,7 +9,11 @@ interface RecommendationCardProps {
 
 export function RecommendationCard({ item, onAction }: RecommendationCardProps) {
   return (
-    <article className="group flex flex-col border border-white/10 bg-white/[0.02] p-5 transition hover:border-[#f75000]/50 hover:bg-white/[0.04]">
+    <motion.article 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="group flex flex-col border border-white/10 bg-white/[0.02] p-5 transition hover:border-[#f75000]/50 hover:bg-white/[0.04] animate-pop-bright"
+    >
       <div className="flex items-start justify-between gap-4">
         {item.image_url && (
           <div className="mb-4 h-32 w-full shrink-0 overflow-hidden rounded-xl bg-black/40">
@@ -36,6 +41,6 @@ export function RecommendationCard({ item, onAction }: RecommendationCardProps) 
           {item.category === "restaurant" ? "View Menu" : item.category === "menu_item" ? "Add" : "Select"}
         </button>
       </div>
-    </article>
+    </motion.article>
   );
 }
